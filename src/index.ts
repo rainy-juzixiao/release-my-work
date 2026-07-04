@@ -361,10 +361,20 @@ program
                         return;
                     }
 
-                    const log = await git.log([`${existingPr.merge_commit_sha}..HEAD`]);
-                    const newCommits = log.all
-                        .map(e => parseCommit(e.message, e.hash))
-                        .filter((c): c is NonNullable<typeof c> => c !== null && c !== undefined);
+                    let newCommits: Array<{ hash: string; raw: string; type: string; scope: string | null; breaking: boolean; description: string; body: string[]; footers: Array<{ token: string; value: string }> }> = [];
+                    try {
+                        const log = await git.log([`${existingPr.merge_commit_sha}..HEAD`]);
+                        newCommits = log.all
+                            .map(e => parseCommit(e.message, e.hash))
+                            .filter((c): c is NonNullable<typeof c> => c !== null && c !== undefined);
+                    } catch {
+                        // merge_commit_sha not found locally (squash merge, shallow clone, etc.)
+                        console.log(chalk.dim(`merge_commit_sha ${existingPr.merge_commit_sha} not found locally. Falling back to tag-based scan.`));
+                        const fallbackLog = await git.log({ from: result.latestTag ?? undefined });
+                        newCommits = fallbackLog.all
+                            .map(e => parseCommit(e.message, e.hash))
+                            .filter((c): c is NonNullable<typeof c> => c !== null && c !== undefined);
+                    }
                     const newBump = recommendBump(newCommits);
 
                     if (newBump === null) {
