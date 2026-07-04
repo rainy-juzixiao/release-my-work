@@ -361,7 +361,7 @@ program
                     let wasMerged = false;
                     if (sha !== undefined && sha !== null && sha !== '') {
                         try {
-                            await git.raw(['rev-parse', '--verify', sha]);
+                            await git.raw(['cat-file', '-e', sha]);
                             wasMerged = true;
                         } catch {
                             // merge_commit_sha not in local history — PR was
