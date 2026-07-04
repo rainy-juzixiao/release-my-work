@@ -1,0 +1,115 @@
+name: Release My Work (Self-Bootstrapping)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install & Build
+        run: |
+          npm ci || npm install
+          npm run build
+
+      - name: Configure Git
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Create Release Pull Request
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          OWNER="${{ github.repository_owner }}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+
+          echo "::group::Scan conventional commits"
+          SCAN_OUTPUT=$(FORCE_COLOR=0 npx tsx src/index.ts scan 2>&1 || true)
+          echo "$SCAN_OUTPUT"
+
+          COMMIT_COUNT=$(echo "$SCAN_OUTPUT" \
+            | grep -oP 'Conventional commits found: \K\d+' || echo "0")
+          echo "::endgroup::"
+
+          if [ "$COMMIT_COUNT" = "0" ]; then
+            echo "No conventional commits since last tag.  Skipping."
+            exit 0
+          fi
+
+          echo "::group::Determine next version"
+          BUMP_OUTPUT=$(FORCE_COLOR=0 npx tsx src/index.ts bump --dry-run 2>&1 || true)
+          echo "$BUMP_OUTPUT"
+
+          NEXT_VER=$(echo "$BUMP_OUTPUT" \
+            | grep -oP '→\s*\Kv?\d+\.\d+\.\d+' | head -1 || echo "")
+          echo "::endgroup::"
+
+          if [ -z "$NEXT_VER" ]; then
+            echo "No version bump warranted.  Skipping."
+            exit 0
+          fi
+
+          VER="${NEXT_VER#v}"
+          BRANCH="release/${VER}"
+          echo "Next version  : $NEXT_VER"
+          echo "Release branch: $BRANCH"
+
+          COMMIT_LOG=$(echo "$SCAN_OUTPUT" \
+            | grep -oP '^\s{2}\S{7}\s+\S+' \
+            | sed 's/^\s\+/- /' || true)
+
+          PR_BODY=$(cat <<-EOF
+          ## ${VER}
+
+          ${COMMIT_LOG}
+
+          ---
+          This pull request was created by \`release-my-work\` — the tool that
+          scans conventional commits, bumps the semantic version, and creates
+          GitHub pull requests.
+          EOF
+          )
+
+          git checkout -b "$BRANCH"
+          node dist/index.js bump
+
+          git push origin "$BRANCH"
+          git push origin --tags
+
+          if gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" &>/dev/null; then
+            echo "PR already exists for branch '$BRANCH'.  Updating body."
+            gh pr edit "$BRANCH" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "chore(release): ${VER}" \
+              --body "$PR_BODY"
+          else
+            echo "Creating new PR for branch '$BRANCH'."
+            gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --head "$BRANCH" \
+              --base main \
+              --title "chore(release): ${VER}" \
+              --body "$PR_BODY" \
+              --label release
+          fi
