@@ -50,6 +50,7 @@ export default tseslint.config(
                     allowNumber: false,
                 },
             ],
+            'curly': ['error', 'all'],
         },
     }
 );

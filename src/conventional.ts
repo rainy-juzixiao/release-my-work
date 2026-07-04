@@ -56,7 +56,9 @@ export function parseCommit(raw: string, hash: string): ConventionalCommit | nul
         /^(?<type>\w+)(?:\((?<scope>[^)]*)\))?(?<breaking>!)?\s*:\s*(?<description>.+)$/m
     );
 
-    if (!headerMatch) return null;
+    if (!headerMatch) {
+        return null;
+    }
 
     const type = headerMatch.groups!.type!;
     const scope = headerMatch.groups!.scope ?? null;
