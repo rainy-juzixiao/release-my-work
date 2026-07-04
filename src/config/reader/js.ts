@@ -21,32 +21,31 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-import * as fs from 'node:fs';
-import * as yaml from 'js-yaml';
+import { createRequire } from 'node:module';
 
 import { deepMerge } from '#@/utils/deep-merge.js';
 import { defaultConfig, type ReleaseConfig } from '../definitions.js';
 
 /**
- * Load a YAML configuration file and merge it with the built-in defaults.
+ * Load a CommonJS (`.js`) configuration file and merge it with defaults.
  *
- * The YAML file should use kebab-case keys (matching the project's
- * `config.yaml` convention).  Keys that happen to be camelCase will
- * deep-merge into the corresponding `ReleaseConfig` fields; kebab-case
- * keys are kept as extra properties on the returned object.
+ * The `.js` file is loaded via `createRequire` and is expected to export its
+ * config via `module.exports` (or `export default` from within a CJS file).
  *
- * @param yamlPath  Path to the YAML file on disk.
- * @returns A complete `ReleaseConfig` with YAML overrides applied.
+ * If the config file is an ESM `.js` file (project-level `"type": "module"`),
+ * use {@link loadConfigFromMjs} instead.
+ *
+ * @param jsPath  Path to the JS file on disk.
+ * @returns A complete `ReleaseConfig` with JS overrides applied.
  */
-export function loadConfigFromYaml(yamlPath: string): ReleaseConfig {
+export function loadConfigFromJs(jsPath: string): ReleaseConfig {
     try {
-        const fileContent = fs.readFileSync(yamlPath, 'utf-8');
+        const _require = createRequire(jsPath);
+        const jsConfig = _require(jsPath) as Partial<ReleaseConfig>;
 
-        const yamlConfig = yaml.load(fileContent) as Partial<ReleaseConfig>;
-
-        return deepMerge(defaultConfig, yamlConfig);
+        return deepMerge(defaultConfig, jsConfig);
     } catch (error: unknown) {
-        console.error(`Error loading YAML config from ${yamlPath}`);
+        console.error(`Error loading JS config from ${jsPath}`);
         throw error;
     }
 }

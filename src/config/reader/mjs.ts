@@ -21,32 +21,28 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-import * as fs from 'node:fs';
-import * as yaml from 'js-yaml';
-
 import { deepMerge } from '#@/utils/deep-merge.js';
 import { defaultConfig, type ReleaseConfig } from '../definitions.js';
 
 /**
- * Load a YAML configuration file and merge it with the built-in defaults.
+ * Load an ESM (`.mjs`) configuration file and merge it with defaults.
  *
- * The YAML file should use kebab-case keys (matching the project's
- * `config.yaml` convention).  Keys that happen to be camelCase will
- * deep-merge into the corresponding `ReleaseConfig` fields; kebab-case
- * keys are kept as extra properties on the returned object.
+ * The file is loaded via dynamic `import()` and can use `export default`
+ * or named exports.  If the module has both a default export and named
+ * exports, the named exports take precedence when the default is not
+ * a plain object.
  *
- * @param yamlPath  Path to the YAML file on disk.
- * @returns A complete `ReleaseConfig` with YAML overrides applied.
+ * @param mjsPath  Path to the MJS file on disk.
+ * @returns A promise resolving to a complete `ReleaseConfig`.
  */
-export function loadConfigFromYaml(yamlPath: string): ReleaseConfig {
+export async function loadConfigFromMjs(mjsPath: string): Promise<ReleaseConfig> {
     try {
-        const fileContent = fs.readFileSync(yamlPath, 'utf-8');
+        const mod = await import(mjsPath);
+        const exported = (mod.default ?? mod) as Partial<ReleaseConfig>;
 
-        const yamlConfig = yaml.load(fileContent) as Partial<ReleaseConfig>;
-
-        return deepMerge(defaultConfig, yamlConfig);
+        return deepMerge(defaultConfig, exported);
     } catch (error: unknown) {
-        console.error(`Error loading YAML config from ${yamlPath}`);
+        console.error(`Error loading MJS config from ${mjsPath}`);
         throw error;
     }
 }

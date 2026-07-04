@@ -22,31 +22,26 @@
  * SOFTWARE.
  */
 import * as fs from 'node:fs';
-import * as yaml from 'js-yaml';
+import { parse } from 'smol-toml';
 
 import { deepMerge } from '#@/utils/deep-merge.js';
 import { defaultConfig, type ReleaseConfig } from '../definitions.js';
 
 /**
- * Load a YAML configuration file and merge it with the built-in defaults.
+ * Load a TOML configuration file and merge it with the built-in defaults.
  *
- * The YAML file should use kebab-case keys (matching the project's
- * `config.yaml` convention).  Keys that happen to be camelCase will
- * deep-merge into the corresponding `ReleaseConfig` fields; kebab-case
- * keys are kept as extra properties on the returned object.
- *
- * @param yamlPath  Path to the YAML file on disk.
- * @returns A complete `ReleaseConfig` with YAML overrides applied.
+ * @param tomlPath  Path to the TOML file on disk.
+ * @returns A complete `ReleaseConfig` with TOML overrides applied.
  */
-export function loadConfigFromYaml(yamlPath: string): ReleaseConfig {
+export function loadConfigFromToml(tomlPath: string): ReleaseConfig {
     try {
-        const fileContent = fs.readFileSync(yamlPath, 'utf-8');
+        const fileContent = fs.readFileSync(tomlPath, 'utf-8');
 
-        const yamlConfig = yaml.load(fileContent) as Partial<ReleaseConfig>;
+        const tomlConfig = parse(fileContent) as unknown as Partial<ReleaseConfig>;
 
-        return deepMerge(defaultConfig, yamlConfig);
+        return deepMerge(defaultConfig, tomlConfig);
     } catch (error: unknown) {
-        console.error(`Error loading YAML config from ${yamlPath}`);
+        console.error(`Error loading TOML config from ${tomlPath}`);
         throw error;
     }
 }

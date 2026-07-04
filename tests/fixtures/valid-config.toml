@@ -1,0 +1,11 @@
+packageName = "toml-pkg"
+versioning = "always-bump-patch"
+bumpMinorPreMajor = false
+prerelease = true
+
+[pullRequest]
+titlePattern = "toml: ${version}"
+draft = true
+
+[github]
+fork = true

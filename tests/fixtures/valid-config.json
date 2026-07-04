@@ -1,0 +1,13 @@
+{
+    "packageName": "json-pkg",
+    "versioning": "always-bump-patch",
+    "bumpMinorPreMajor": false,
+    "prerelease": true,
+    "pullRequest": {
+        "titlePattern": "json: ${version}",
+        "draft": true
+    },
+    "github": {
+        "fork": true
+    }
+}
