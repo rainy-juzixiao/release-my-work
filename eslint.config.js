@@ -31,6 +31,7 @@ export default tseslint.config(
             'src/**/*.test.ts',
             'src/frontend/generated/*',
             'eslint.config.js',
+            'tests/**',
         ]
     },
     eslint.configs.recommended,
