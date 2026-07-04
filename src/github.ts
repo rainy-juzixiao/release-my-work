@@ -14,7 +14,7 @@
  * copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * IMPLIED, INCLUDING NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
  * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
@@ -24,19 +24,12 @@
 import {Octokit} from '@octokit/rest';
 
 export interface GitHubCreatePROptions {
-    /** GitHub token (defaults to GITHUB_TOKEN env var) */
     token?: string;
-    /** Owner of the repository (e.g. "my-org") */
     owner: string;
-    /** Repository name (e.g. "my-repo") */
     repo: string;
-    /** Source branch (feature branch) */
     head: string;
-    /** Target branch (usually "main" or "master") */
     base: string;
-    /** PR title */
     title: string;
-    /** PR body */
     body: string;
 }
 
@@ -45,38 +38,32 @@ export interface GitHubPRResult {
     number: number;
 }
 
-/**
- * Create an authenticated Octokit client.
- */
+export interface PullRequestInfo {
+    number: number;
+    state: string;
+    html_url: string;
+}
+
 export function createClient(token?: string): Octokit {
-    const resolved = token ?? process.env.GITHUB_TOKEN;
+    const resolved = token ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
     if (resolved === undefined || resolved === null || resolved === '') {
         throw new Error(
-            'GitHub token is required. Set the GITHUB_TOKEN environment variable or pass it explicitly.'
+            'GitHub token is required. Set GH_TOKEN or GITHUB_TOKEN environment variable.'
         );
     }
     return new Octokit({auth: resolved});
 }
 
-/**
- * Parse a GitHub remote URL (git@github.com:owner/repo.git or https://github.com/owner/repo)
- * into { owner, repo }.
- */
-export function parseGitHubRemote(remote: string): { owner: string; repo: string } {
-    // SSH: git@github.com:owner/repo.git
+export function parseGitHubRemote(remote: string): {owner: string; repo: string} {
     const sshMatch = remote.match(/git@github\.com:([^/]+)\/(.+)\.git$/);
     if (sshMatch) {return {owner: sshMatch[1], repo: sshMatch[2]};}
 
-    // HTTPS: https://github.com/owner/repo
     const httpsMatch = remote.match(/https:\/\/github\.com\/([^/]+)\/([^/.]+)/);
     if (httpsMatch) {return {owner: httpsMatch[1], repo: httpsMatch[2]};}
 
     throw new Error(`Cannot parse GitHub remote: "${remote}"`);
 }
 
-/**
- * Create a Pull Request on GitHub.
- */
 export async function createPullRequest(options: GitHubCreatePROptions): Promise<GitHubPRResult> {
     const octokit = createClient(options.token);
 
@@ -89,6 +76,54 @@ export async function createPullRequest(options: GitHubCreatePROptions): Promise
         body: options.body,
     });
 
+    return {
+        url: response.data.html_url,
+        number: response.data.number,
+    };
+}
+
+/**
+ * Find a pull request by head branch.
+ * Returns null if no PR exists for that branch.
+ */
+export async function findPullRequest(
+    owner: string,
+    repo: string,
+    head: string,
+    token?: string,
+): Promise<PullRequestInfo | null> {
+    const octokit = createClient(token);
+    const {data} = await octokit.rest.pulls.list({
+        owner,
+        repo,
+        head,
+        state: 'all',
+        per_page: 1,
+    });
+    return data[0] !== undefined && data[0] !== null
+        ? {number: data[0].number, state: data[0].state, html_url: data[0].html_url}
+        : null;
+}
+
+/**
+ * Update an existing pull request's title and body.
+ */
+export async function updatePullRequest(
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    title: string,
+    body: string,
+    token?: string,
+): Promise<GitHubPRResult> {
+    const octokit = createClient(token);
+    const response = await octokit.rest.pulls.update({
+        owner,
+        repo,
+        pull_number: pullNumber,
+        title,
+        body,
+    });
     return {
         url: response.data.html_url,
         number: response.data.number,
