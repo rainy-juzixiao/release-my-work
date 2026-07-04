@@ -195,8 +195,8 @@ program
 program
     .command('pr')
     .description('Create a GitHub Pull Request for the release')
-    .requiredOption('-o, --owner <owner>', 'GitHub repository owner')
-    .requiredOption('-r, --repo <repo>', 'GitHub repository name')
+    .option('-o, --owner <owner>', 'GitHub repository owner (parsed from git remote if omitted)')
+    .option('-r, --repo <repo>', 'GitHub repo name (parsed from git remote if omitted)')
     .option('-c, --config-path <path>', 'Path to config file')
     .option('-t, --token <token>', 'GitHub token (defaults to GH_TOKEN or GITHUB_TOKEN env)')
     .option('-b, --base <branch>', 'Target branch (default: main)', 'main')
@@ -369,8 +369,8 @@ program
                             .filter((c): c is NonNullable<typeof c> => c !== null && c !== undefined);
                     } catch {
                         // merge_commit_sha not found locally (squash merge, shallow clone, etc.)
-                        console.log(chalk.dim(`merge_commit_sha ${existingPr.merge_commit_sha} not found locally. Falling back to tag-based scan.`));
-                        const fallbackLog = await git.log({ from: result.latestTag ?? undefined });
+                        console.log(chalk.dim(`merge_commit_sha ${existingPr.merge_commit_sha} not found locally. Falling back to recent commit scan.`));
+                        const fallbackLog = await git.log({ maxCount: 50 });
                         newCommits = fallbackLog.all
                             .map(e => parseCommit(e.message, e.hash))
                             .filter((c): c is NonNullable<typeof c> => c !== null && c !== undefined);
@@ -458,7 +458,7 @@ program
             await git.commit(`chore(release): ${ver}`);
 
             console.log(chalk.dim(`Pushing ${branchName}...`));
-            await git.push('origin', branchName);
+            await git.push(['-u', 'origin', branchName]);
 
             const title = `chore(release): ${ver}`;
 
@@ -485,7 +485,7 @@ program
                         console.error(chalk.red(
                             `GitHub rejected the PR: no commits between ${options.base} and ${branchName}.\n` +
                             `  Local HEAD: ${sha}\n` +
-                            `  Uncommitted: ${status.files.map(f => f.path).join(', ') || '(none)'}\n` +
+                            `  Uncommitted: ${status.files.length > 0 ? status.files.map(f => f.path).join(', ') : '(none)'}\n` +
                             'Run `git push origin ' + branchName + ' --force` manually if the branch is behind.',
                         ));
                     }
@@ -508,8 +508,8 @@ program
     .command('auto')
     .description('Run bump + PR in one go (bump version, push, create pull request)')
     .option('-c, --config-path <path>', 'Path to config file')
-    .requiredOption('-o, --owner <owner>', 'GitHub repository owner')
-    .requiredOption('-r, --repo <repo>', 'GitHub repository name')
+    .option('-o, --owner <owner>', 'GitHub repository owner (parsed from git remote if omitted)')
+    .option('-r, --repo <repo>', 'GitHub repo name (parsed from git remote if omitted)')
     .option('-t, --token <token>', 'GitHub token (defaults to GH_TOKEN or GITHUB_TOKEN env)')
     .option('-b, --base <branch>', 'Target branch (default: main)', 'main')
     .option('-p, --path <path>', 'Repository path (default: current directory)')
@@ -614,7 +614,7 @@ program
 program
     .command('release-publish')
     .description('Tag, generate changelog, and create a GitHub Release after a PR merge')
-    .requiredOption('-v, --version <version>', 'Version to publish (e.g. 1.2.3)')
+    .option('-v, --version <version>', 'Version to publish (auto-detected from last merged release/ branch if omitted)')
     .option('-t, --token <token>', 'GitHub token (defaults to GH_TOKEN or GITHUB_TOKEN env)')
     .option('-r, --repo <repo>', 'GitHub repo in owner/repo format (defaults to GITHUB_REPOSITORY env)')
     .option('-p, --path <path>', 'Repository path (default: current directory)')
@@ -636,35 +636,45 @@ program
 
         try {
             const git = openGit(options.path);
-            const ver = options.version;
+            let ver = options.version;
 
-            // Guard: tag must not already exist
+            if (ver === undefined || ver === null || ver === '') {
+                const mergeLog = await git.log(['--merges', '--oneline', '-5']);
+                const match = mergeLog.all
+                    .map(e => e.message.match(/release\/(\d+\.\d+\.\d+)/))
+                    .find(Boolean);
+                if (match) {
+                    ver = match[1];
+                    console.log(chalk.dim(`Auto-detected version ${ver} from merged release branch.`));
+                } else {
+                    console.log(chalk.dim('No merged release/ branch found. Nothing to publish.'));
+                    return;
+                }
+            }
+
             const tags = await git.tags();
             if (tags.all.includes(`v${ver}`)) {
-                console.log(chalk.yellow(`Tag v${ver} already exists. Nothing to publish.`));
+                console.log(chalk.dim(`Tag v${ver} already exists. Nothing to publish.`));
                 return;
             }
 
-            // Check if the release PR was merged into current branch
             const recentLog = await git.log(['--merges', '--oneline', '-10']);
             const releaseMerge = recentLog.all.find(
                 e => e.message.includes(`release/${ver}`),
             );
             if (!releaseMerge) {
-                console.log(chalk.yellow(
-                    `No merge commit for release/${ver} found in recent history. ` +
-                    'Publishing anyway. Use --no-delete-branch if the branch was already cleaned up.',
+                console.error(chalk.red(
+                    `Cannot publish v${ver}: no merge commit for release/${ver} in recent history. ` +
+                    'The PR must be merged before publishing.',
                 ));
-            } else {
-                console.log(chalk.dim(`Found merge commit: ${releaseMerge.hash} ${releaseMerge.message}`));
+                process.exit(1);
             }
+            console.log(chalk.green(`Release PR merged: ${releaseMerge.hash} ${releaseMerge.message}`));
 
-            // Tag HEAD
             await git.addTag(`v${ver}`);
-            await git.push('origin', `v${ver}`);
+            await git.push(['origin', `v${ver}`],);
             console.log(chalk.green(`Tagged v${ver}`));
 
-            // Generate changelog
             const scan = await scanGitHistory({repoPath: options.path});
             const commitBullets = scan.commits
                 .map(c => {
@@ -678,7 +688,6 @@ program
             console.log(chalk.dim('\nChangelog:'));
             console.log(changelog);
 
-            // Create GitHub Release
             const octokit = createClient(token);
             const releaseResp = await octokit.rest.repos.createRelease({
                 owner,
@@ -689,7 +698,6 @@ program
             });
             console.log(chalk.green(`Release created: ${chalk.underline(releaseResp.data.html_url)}`));
 
-            // Delete release branch
             if (options.deleteBranch !== false) {
                 const branchName = `release/${ver}`;
                 try {
