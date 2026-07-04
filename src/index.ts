@@ -27,9 +27,11 @@
 import {Command} from 'commander';
 import chalk from 'chalk';
 import fs from 'node:fs';
+import semver from 'semver';
 import {scanGitHistory, openGit} from '#@/git';
-import {computeNextVersion, buildVersionCommitMessage} from '#@/version';
+import {computeNextVersion, buildVersionCommitMessage, recommendBump} from '#@/version';
 import {createPullRequest, findPullRequest, updatePullRequest, parseGitHubRemote} from '#@/github';
+import {parseCommit} from '#@/conventional';
 
 const program = new Command();
 
@@ -236,8 +238,9 @@ program
                 return;
             }
 
-            const ver = next.newVersion;
-            const branchName = `release/${ver}`;
+            let ver = next.newVersion;
+            let branchName = `release/${ver}`;
+            let commitsForPR = result.commits;
 
             const tags = await git.tags();
             if (tags.all.includes(`v${ver}`)) {
@@ -249,17 +252,48 @@ program
             const existingPr = await findPullRequest(owner, repo, branchName, token);
 
             if (existingPr !== null && existingPr !== undefined) {
-                if (existingPr.state === 'closed' || existingPr.state === 'merged') {
-                    console.log(chalk.yellow(`PR #${existingPr.number} for ${branchName} is ${existingPr.state}. Skipping.`));
-                    if (existingPr.state === 'merged') {
-                        console.log(chalk.yellow(`Tag v${ver} should have been created by publish.yml. Check that workflow.`));
+                if (existingPr.state === 'open') {
+                    console.log(chalk.dim(`Found open PR #${existingPr.number}. Will update.`));
+                } else {
+                    // PR closed/merged but tag missing — this version was already taken.
+                    // Scan post-merge commits and advance to the next version.
+                    console.log(chalk.dim(`PR #${existingPr.number} for ${branchName} is ${existingPr.state}.`));
+
+                    if (existingPr.merge_commit_sha === undefined || existingPr.merge_commit_sha === null || existingPr.merge_commit_sha === '') {
+                        console.log(chalk.yellow(`PR was ${existingPr.state} without merge info. Skipping.`));
+                        return;
                     }
-                    return;
+
+                    const log = await git.log([`${existingPr.merge_commit_sha}..HEAD`]);
+                    const newCommits = log.all
+                        .map(e => parseCommit(e.message, e.hash))
+                        .filter((c): c is NonNullable<typeof c> => c !== null && c !== undefined);
+                    const newBump = recommendBump(newCommits);
+
+                    if (newBump === null) {
+                        console.log(chalk.dim(`No new conventional commits since ${branchName} was merged. Skipping.`));
+                        return;
+                    }
+
+                    const baseline = semver.parse(ver);
+                    if (baseline === null) {
+                        console.log(chalk.yellow(`Cannot parse version ${ver}. Skipping.`));
+                        return;
+                    }
+
+                    ver = baseline.inc(newBump).version;
+                    branchName = `release/${ver}`;
+                    commitsForPR = newCommits;
+                    console.log(chalk.dim(`Advancing to ${ver} based on post-merge commits.`));
+
+                    if (tags.all.includes(`v${ver}`)) {
+                        console.log(chalk.dim(`Tag v${ver} already exists. Skipping.`));
+                        return;
+                    }
                 }
-                console.log(chalk.dim(`Found open PR #${existingPr.number}. Will update.`));
             }
 
-            const commitLog = result.commits
+            const commitLog = commitsForPR
                 .map(c => {
                     const scope = c.scope !== undefined && c.scope !== null && c.scope !== ''
                         ? `(${c.scope})`
@@ -308,7 +342,7 @@ program
 
             const title = `chore(release): ${ver}`;
 
-            if (existingPr !== null && existingPr !== undefined) {
+            if (existingPr !== null && existingPr !== undefined && existingPr.state === 'open') {
                 const updated = await updatePullRequest(owner, repo, existingPr.number, title, prBody, token);
                 console.log(chalk.green(`Updated PR #${updated.number}: ${chalk.underline(updated.url)}`));
             } else {
@@ -324,10 +358,7 @@ program
                 console.log(chalk.green(`Created PR #${created.number}: ${chalk.underline(created.url)}`));
             }
 
-            try {
-                await git.checkout(currentBranch);
-            } catch { /* ok */
-            }
+            try { await git.checkout(currentBranch); } catch { /* ok */ }
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : String(err);
             console.error(chalk.red('Error:'), errorMessage);
