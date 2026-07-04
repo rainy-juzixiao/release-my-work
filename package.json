@@ -1,13 +1,48 @@
 {
   "name": "release-my-work",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "description": "Scan git history for Conventional Commits, bump version, and create GitHub Pull Requests",
+  "type": "module",
+  "bin": {
+    "release-my-work": "dist/index.js"
   },
-  "keywords": [],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --clean --dts",
+    "dev": "tsx src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --ext .ts,.tsx",
+    "lint:fix": "eslint . --ext .ts,.tsx --fix"
+  },
+  "imports": {
+    "#@/*": "./src/*"
+  },
+  "keywords": [
+    "conventional-commits",
+    "semver",
+    "github",
+    "release"
+  ],
   "author": "",
   "license": "ISC",
-  "type": "commonjs"
+  "dependencies": {
+    "@eslint/js": "^10.0.1",
+    "@octokit/rest": "^21.1.1",
+    "chalk": "^5.4.1",
+    "commander": "^13.1.0",
+    "conventional-commits-parser": "^6.1.0",
+    "conventional-recommended-bump": "^11.0.0",
+    "eslint": "^10.6.0",
+    "semver": "^7.7.1",
+    "simple-git": "^3.27.0",
+    "typescript-eslint": "^8.62.1"
+  },
+  "devDependencies": {
+    "@types/conventional-commits-parser": "^5.0.1",
+    "@types/node": "^22.13.14",
+    "@types/semver": "^7.7.0",
+    "tsup": "^8.4.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  }
 }
