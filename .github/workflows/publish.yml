@@ -1,0 +1,86 @@
+name: Publish
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    # Only proceed if PR was merged AND it was a release PR (branch: release/*)
+    if: |
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install & Build
+        run: |
+          npm ci || npm install
+          npm run build
+
+      - name: Configure Git
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Extract version from branch name
+        id: version
+        run: |
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          VER="${BRANCH#release/}"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "Extracted version: $VER"
+
+      - name: Generate changelog
+        id: changelog
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER="${{ steps.version.outputs.version }}"
+
+          echo "::group::Scan conventional commits"
+          SCAN_OUTPUT=$(FORCE_COLOR=0 npx tsx src/index.ts scan 2>&1 || true)
+          echo "$SCAN_OUTPUT"
+          echo "::endgroup::"
+
+          COMMIT_LOG=$(echo "$SCAN_OUTPUT" \
+            | grep -oP '^\s{2}\S{7}\s+\S+' \
+            | sed 's/^\s\+/- /' || true)
+
+          echo "log<<DELIM" >> "$GITHUB_OUTPUT"
+          echo "$COMMIT_LOG" >> "$GITHUB_OUTPUT"
+          echo "DELIM" >> "$GITHUB_OUTPUT"
+
+      - name: Create git tag
+        run: |
+          VER="${{ steps.version.outputs.version }}"
+          MERGE_SHA="${{ github.event.pull_request.merge_commit_sha }}"
+
+          git tag "v${VER}" "$MERGE_SHA"
+          git push origin "v${VER}"
+          echo "Tagged v${VER} at ${MERGE_SHA}"
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER="${{ steps.version.outputs.version }}"
+          NOTES="${{ steps.changelog.outputs.log }}"
+
+          gh release create "v${VER}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "v${VER}" \
+            --notes "${NOTES}"

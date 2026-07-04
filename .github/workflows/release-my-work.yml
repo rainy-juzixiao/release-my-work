@@ -1,4 +1,4 @@
-name: Release My Work (Self-Bootstrapping)
+name: Release PR
 
 on:
   push:
@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  release:
+  create-pr:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,14 +36,13 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
 
-      - name: Create Release Pull Request
+      - name: Create / Update Release Pull Request
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           set -euo pipefail
-          OWNER="${{ github.repository_owner }}"
-          REPO="${GITHUB_REPOSITORY#*/}"
 
+          # ─── 1. Scan conventional commits since latest tag ───
           echo "::group::Scan conventional commits"
           SCAN_OUTPUT=$(FORCE_COLOR=0 npx tsx src/index.ts scan 2>&1 || true)
           echo "$SCAN_OUTPUT"
@@ -82,29 +81,37 @@ jobs:
           PR_BODY=$(cat <<-EOF
           ## ${VER}
 
+          ### Changelog
+
           ${COMMIT_LOG}
 
           ---
-          This pull request was created by \`release-my-work\` — the tool that
-          scans conventional commits, bumps the semantic version, and creates
-          GitHub pull requests.
+          This pull request was created by \`release-my-work\`.
+
+          :warning: **After approval and merge**, the publish workflow will
+          automatically create the git tag \`v${VER}\` and a GitHub Release.
           EOF
           )
 
+          # Update package.json version only — no git tag yet
           git checkout -b "$BRANCH"
-          node dist/index.js bump
+
+          jq --arg ver "$VER" '.version = $ver' package.json > package.json.tmp
+          mv package.json.tmp package.json
+
+          git add package.json
+          git commit -m "chore(release): ${VER}"
 
           git push origin "$BRANCH"
-          git push origin --tags
 
           if gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" &>/dev/null; then
-            echo "PR already exists for branch '$BRANCH'.  Updating body."
+            echo "PR already exists for '$BRANCH'.  Updating."
             gh pr edit "$BRANCH" \
               --repo "$GITHUB_REPOSITORY" \
               --title "chore(release): ${VER}" \
               --body "$PR_BODY"
           else
-            echo "Creating new PR for branch '$BRANCH'."
+            echo "Creating new PR for '$BRANCH'."
             gh pr create \
               --repo "$GITHUB_REPOSITORY" \
               --head "$BRANCH" \
