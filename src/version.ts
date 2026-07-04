@@ -50,9 +50,15 @@ export function recommendBump(commits: ConventionalCommit[]): 'major' | 'minor' 
 
     for (const c of commits) {
         const level = bumpLevel(c.type, c.breaking);
-        if (level === 'major') {return 'major';}
-        if (level === 'minor') {bump = 'minor';}
-        if (level === 'patch' && bump !== 'minor') {bump = 'patch';}
+        if (level === 'major') {
+            return 'major';
+        }
+        if (level === 'minor') {
+            bump = 'minor';
+        }
+        if (level === 'patch' && bump !== 'minor') {
+            bump = 'patch';
+        }
     }
 
     return bump;
