@@ -1,0 +1,15 @@
+release-type: node
+package-name: partial-pkg
+prerelease: false
+
+pull-request:
+  title-pattern: "custom: ${version}"
+  draft: true
+
+github:
+  fork: true
+
+changelog-sections:
+  - type: feat
+    section: Features
+    hidden: false

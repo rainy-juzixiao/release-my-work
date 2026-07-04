@@ -1,0 +1,47 @@
+release-type: node
+package-name: my-package
+include-v-in-tag: false
+versioning: always-bump-patch
+bump-minor-pre-major: false
+bump-patch-for-minor-pre-major: true
+release-as: "2.0.0"
+prerelease: true
+prerelease-type: rc
+
+pull-request:
+  title-pattern: "release: ${version}"
+  header: "## What's New\n\n"
+  footer: "---\n"
+  draft: true
+  labels:
+    - release
+  release-label:
+    custom: shipped
+  skip-label: wip
+  date: false
+
+changelog-path: CHANGES.md
+changelog-type: github
+changelog-host: https://git.example.com
+changelog-sections:
+  - type: feat
+    section: Features
+    hidden: false
+  - type: fix
+    section: Fixes
+    hidden: true
+
+github:
+  fork: true
+  draft: true
+  prerelease: true
+  skip-github-release: true
+  signoff: "Test Bot <bot@example.com>"
+
+extra-files:
+  - README.md
+  - package.json
+release-search-depth: 100
+commit-search-depth: 200
+sequential-calls: true
+skip-labeling: true
