@@ -354,76 +354,62 @@ program
                 } else {
                     console.log(chalk.dim(`PR #${existingPr.number} for ${branchName} is ${existingPr.state}.`));
 
-                    // Check if the PR was actually merged (merge_commit_sha exists locally).
-                    // If it was merged but tag is missing → advance to next version.
-                    // If it was only closed (not merged) → recreate branch for the same version.
+                    // Try to determine if the PR was merged: attempt git log with
+                    // merge_commit_sha..HEAD. If the SHA exists in local history
+                    // (real merge commit), it works. Otherwise it throws — the
+                    // PR was closed without merging (or the test merge ref
+                    // refs/pull/N/merge was never pushed to any branch).
                     const sha = existingPr.merge_commit_sha;
-                    let wasMerged = false;
                     if (sha !== undefined && sha !== null && sha !== '') {
                         try {
-                            await git.raw(['rev-parse', '--verify', sha]);
-                            wasMerged = true;
-                        } catch {
-                            // merge_commit_sha not in local history — PR was
-                            // closed without merging, or the test merge ref
-                            // refs/pull/N/merge was not fetched.
-                        }
-                    }
-
-                    if (wasMerged) {
-                        // PR was merged but tag missing — advance version.
-                        // Scan post-merge commits to find the next version.
-                        let newCommits: Array<{ hash: string; raw: string; type: string; scope: string | null; breaking: boolean; description: string; body: string[]; footers: Array<{ token: string; value: string }> }> = [];
-                        let newBump: 'major' | 'minor' | 'patch' | null = null;
-                        try {
                             const log = await git.log([`${sha}..HEAD`]);
-                            newCommits = log.all
+                            const newCommits = log.all
                                 .map(e => parseCommit(e.message, e.hash))
                                 .filter((c): c is NonNullable<typeof c> => c !== null && c !== undefined);
-                            newBump = recommendBump(newCommits);
+                            const newBump = recommendBump(newCommits);
+
+                            if (newBump === null) {
+                                console.log(chalk.dim(`No new conventional commits since ${branchName} was merged. Skipping.`));
+                                return;
+                            }
+
+                            // PR was merged — advance version until we find one
+                            // without a closed PR (handles previously consumed
+                            // versions where tags were never created).
+                            while (true) {
+                                const baseline = semver.parse(ver);
+                                if (baseline === null) {
+                                    console.log(chalk.yellow(`Cannot parse version ${ver}. Skipping.`));
+                                    return;
+                                }
+
+                                ver = baseline.inc(newBump).version;
+                                branchName = `release/${ver}`;
+                                commitsForPR = newCommits;
+                                console.log(chalk.dim(`Advancing to ${ver}...`));
+
+                                if (tags.all.includes(`v${ver}`)) {
+                                    console.log(chalk.dim(`Tag v${ver} already exists. Skipping.`));
+                                    return;
+                                }
+
+                                const nextPr = await findPullRequest(owner, repo, branchName, token);
+                                if (nextPr === null || nextPr === undefined || nextPr.state === 'open') {
+                                    break;
+                                }
+                                console.log(chalk.dim(`PR #${nextPr.number} for ${branchName} is also ${nextPr.state}. Advancing further.`));
+                            }
+                            // Continue to create/update PR for the advanced version
                         } catch {
-                            console.log(chalk.dim(`merge_commit_sha ${sha} not found locally.`));
-                            console.log(chalk.dim('Cannot determine post-merge commits. Skipping automatic version advancement.'));
-                            return;
-                        }
-
-                        if (newBump === null) {
-                            console.log(chalk.dim(`No new conventional commits since ${branchName} was merged. Skipping.`));
-                            return;
-                        }
-
-                        // Loop: advance version until we find one without a closed PR
-                        // (handles the case where multiple versions were consumed by
-                        //  merged PRs but their tags were never created)
-                        while (true) {
-                            const baseline = semver.parse(ver);
-                            if (baseline === null) {
-                                console.log(chalk.yellow(`Cannot parse version ${ver}. Skipping.`));
-                                return;
-                            }
-
-                            ver = baseline.inc(newBump).version;
-                            branchName = `release/${ver}`;
-                            commitsForPR = newCommits;
-                            console.log(chalk.dim(`Advancing to ${ver}...`));
-
-                            if (tags.all.includes(`v${ver}`)) {
-                                console.log(chalk.dim(`Tag v${ver} already exists. Skipping.`));
-                                return;
-                            }
-
-                            // Check if the advanced version also has a closed PR
-                            const nextPr = await findPullRequest(owner, repo, branchName, token);
-                            if (nextPr === null || nextPr === undefined || nextPr.state === 'open') {
-                                break; // Available — use this version
-                            }
-                            console.log(chalk.dim(`PR #${nextPr.number} for ${branchName} is also ${nextPr.state}. Advancing further.`));
+                            // merge_commit_sha not in local history (exit 128) —
+                            // PR was closed without merging.
+                            console.log(chalk.dim(`merge_commit_sha ${sha} not found locally. PR was closed without merging.`));
+                            console.log(chalk.dim('Will recreate the release branch for the same version.'));
+                            // Keep ver, branchName, commitsForPR unchanged
                         }
                     } else {
-                        // PR was closed without merging — recreate the release
-                        // branch for the same version since it was never published.
+                        // No merge_commit_sha at all — definitely not merged
                         console.log(chalk.dim('PR was closed without merging. Will recreate the release branch.'));
-                        // Keep ver, branchName, commitsForPR unchanged
                     }
                 }
             }
