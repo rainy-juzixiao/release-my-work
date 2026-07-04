@@ -449,29 +449,49 @@ program
             const repoRoot = options.path ?? process.cwd();
             const pkgPath = `${repoRoot}/package.json`;
             let versionFile = 'package.json';
+            let versionChanged = true;
+
             try {
                 const pkgRaw = fs.readFileSync(pkgPath, 'utf-8');
                 const pkg = JSON.parse(pkgRaw) as Record<string, unknown>;
-                pkg.version = ver;
-                fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+                if (pkg.version === ver) {
+                    console.log(chalk.dim(`Version ${ver} is already set in package.json. Skipping version commit.`));
+                    versionChanged = false;
+                } else {
+                    pkg.version = ver;
+                    fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+                }
             } catch {
                 // Fallback to version.txt when package.json is unavailable
                 versionFile = 'version.txt';
-                fs.writeFileSync(`${repoRoot}/version.txt`, `${ver}\n`);
+                let existingVer = '';
+                try {
+                    existingVer = fs.readFileSync(`${repoRoot}/version.txt`, 'utf-8').trim();
+                } catch { /* file does not exist yet */ }
+                if (existingVer === ver) {
+                    console.log(chalk.dim(`Version ${ver} is already set in version.txt. Skipping version commit.`));
+                    versionChanged = false;
+                } else {
+                    fs.writeFileSync(`${repoRoot}/version.txt`, `${ver}\n`);
+                }
             }
 
-            await git.raw(['add', versionFile]);
-            await git.raw(['commit', '-m', `chore(release): ${ver}`]);
+            if (versionChanged) {
+                await git.raw(['add', versionFile]);
+                await git.raw(['commit', '-m', `chore(release): ${ver}`]);
 
-            // Verify the branch is actually ahead of base before pushing
-            const baseSha = (await git.raw(['rev-parse', options.base ?? 'main'])).trim();
-            const branchSha = (await git.raw(['rev-parse', 'HEAD'])).trim();
-            if (baseSha === branchSha) {
-                console.error(chalk.red(
-                    `Version bump commit was not created. HEAD is still at ${baseSha}.\n` +
-                    'This usually means the file was already up-to-date. Check your working tree.',
-                ));
-                process.exit(1);
+                // Verify the branch is actually ahead of base before pushing
+                const baseSha = (await git.raw(['rev-parse', options.base ?? 'main'])).trim();
+                const branchSha = (await git.raw(['rev-parse', 'HEAD'])).trim();
+                if (baseSha === branchSha) {
+                    console.error(chalk.red(
+                        `Version bump commit was not created. HEAD is still at ${baseSha}.\n` +
+                        'This usually means the file was already up-to-date. Check your working tree.',
+                    ));
+                    process.exit(1);
+                }
+            } else {
+                console.log(chalk.dim(`Proceeding without version commit — branch already reflects ${ver}.`));
             }
 
             console.log(chalk.dim(`Pushing ${branchName}...`));
