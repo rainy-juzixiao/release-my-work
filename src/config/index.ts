@@ -21,9 +21,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-import * as fs from "node:fs";
-import * as yaml from 'js-yaml';
-
 export interface ChangelogSection {
     type: string;
     section: string;
@@ -122,51 +119,4 @@ export const defaultConfig: ReleaseConfig = {
     skipLabeling: false,
 };
 
-function deepMerge<T>(
-    target: T,
-    source: Partial<T> | undefined
-): T {
-    if (!source) {
-        return target;
-    }
-    const targetRecord = target as Record<string, unknown>;
-    const sourceRecord = source as Record<string, unknown>;
-    const result: Record<string, unknown> = { ...targetRecord };
-
-    for (const key in sourceRecord) {
-        if (Object.prototype.hasOwnProperty.call(sourceRecord, key)) {
-            const sourceVal = sourceRecord[key];
-            const targetVal = result[key];
-
-            if (
-                sourceVal != null &&
-                typeof sourceVal === 'object' &&
-                !Array.isArray(sourceVal) &&
-                targetVal != null &&
-                typeof targetVal === 'object' &&
-                !Array.isArray(targetVal)
-            ) {
-                result[key] = deepMerge(
-                    targetVal as Record<string, unknown>,
-                    sourceVal as Record<string, unknown>
-                );
-            } else if (sourceVal !== undefined) {
-                result[key] = sourceVal;
-            }
-        }
-    }
-    return result as T;
-}
-
-export function loadConfigFromYaml(yamlPath: string) : ReleaseConfig{
-    try {
-        const fileContent = fs.readFileSync(yamlPath, 'utf-8');
-
-        const yamlConfig = yaml.load(fileContent) as Partial<ReleaseConfig>;
-
-        return deepMerge(defaultConfig, yamlConfig);
-    } catch (error: unknown){
-        console.error(`Error loading YAML config from ${yamlPath}`);
-        throw error;
-    }
-}
+export * from '#@/config/reader/index.js';

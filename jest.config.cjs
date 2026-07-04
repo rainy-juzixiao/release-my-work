@@ -19,11 +19,17 @@ module.exports = {
   },
 
   moduleNameMapper: {
+    // Strip .js extension from relative imports so Jest resolves .ts files
+    '^(\\.{1,2}/.*)\\.js$': '$1',
+    // Project-internal path alias
     '^#@/(.*)\\.js$': '<rootDir>/src/$1',
   },
 
   testMatch: ['<rootDir>/tests/**/*.test.ts'],
 
-  // Collect coverage only from the source module under test
-  collectCoverageFrom: ['src/config/index.ts'],
+  // Collect coverage from the config module and utilities
+  collectCoverageFrom: [
+    'src/config/**/*.ts',
+    'src/utils/**/*.ts',
+  ],
 };
