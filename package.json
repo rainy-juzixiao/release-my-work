@@ -12,6 +12,8 @@
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
+    "test": "jest",
+    "test:coverage": "jest --coverage",
     "lint:fix": "eslint . --ext .ts,.tsx --fix"
   },
   "imports": {
