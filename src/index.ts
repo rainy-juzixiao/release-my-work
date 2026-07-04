@@ -446,19 +446,41 @@ program
             } catch {
                 /* branch doesn't exist locally */
             }
-            await git.checkoutLocalBranch(branchName);
 
-            const pkgPath = `${options.path ?? process.cwd()}/package.json`;
-            const pkgRaw = fs.readFileSync(pkgPath, 'utf-8');
-            const pkg = JSON.parse(pkgRaw) as Record<string, unknown>;
-            pkg.version = ver;
-            fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+            // Create branch, write version file, commit, push — using raw git
+            // to ensure the commit is actually created and pushed.
+            await git.raw(['checkout', '-b', branchName]);
 
-            await git.add('package.json');
-            await git.commit(`chore(release): ${ver}`);
+            const repoRoot = options.path ?? process.cwd();
+            const pkgPath = `${repoRoot}/package.json`;
+            let versionFile = 'package.json';
+            try {
+                const pkgRaw = fs.readFileSync(pkgPath, 'utf-8');
+                const pkg = JSON.parse(pkgRaw) as Record<string, unknown>;
+                pkg.version = ver;
+                fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+            } catch {
+                // Fallback to version.txt when package.json is unavailable
+                versionFile = 'version.txt';
+                fs.writeFileSync(`${repoRoot}/version.txt`, `${ver}\n`);
+            }
+
+            await git.raw(['add', versionFile]);
+            await git.raw(['commit', '-m', `chore(release): ${ver}`]);
+
+            // Verify the branch is actually ahead of base before pushing
+            const baseSha = (await git.raw(['rev-parse', options.base ?? 'main'])).trim();
+            const branchSha = (await git.raw(['rev-parse', 'HEAD'])).trim();
+            if (baseSha === branchSha) {
+                console.error(chalk.red(
+                    `Version bump commit was not created. HEAD is still at ${baseSha}.\n` +
+                    'This usually means the file was already up-to-date. Check your working tree.',
+                ));
+                process.exit(1);
+            }
 
             console.log(chalk.dim(`Pushing ${branchName}...`));
-            await git.push(['-u', 'origin', branchName]);
+            await git.raw(['push', 'origin', branchName]);
 
             const title = `chore(release): ${ver}`;
 
@@ -466,31 +488,16 @@ program
                 const updated = await updatePullRequest(owner, repo, existingPr.number, title, prBody, token);
                 console.log(chalk.green(`Updated PR #${updated.number}: ${chalk.underline(updated.url)}`));
             } else {
-                try {
-                    const created = await createPullRequest({
-                        token,
-                        owner,
-                        repo,
-                        head: branchName,
-                        base: options.base,
-                        title,
-                        body: prBody,
-                    });
-                    console.log(chalk.green(`Created PR #${created.number}: ${chalk.underline(created.url)}`));
-                } catch (prErr: unknown) {
-                    // 422 from GitHub means the branch has no diff against base
-                    if (prErr instanceof Error && prErr.message.includes('422')) {
-                        const sha = (await git.log(['-1', '--format=%H'])).latest?.hash ?? '?';
-                        const status = await git.status();
-                        console.error(chalk.red(
-                            `GitHub rejected the PR: no commits between ${options.base} and ${branchName}.\n` +
-                            `  Local HEAD: ${sha}\n` +
-                            `  Uncommitted: ${status.files.length > 0 ? status.files.map(f => f.path).join(', ') : '(none)'}\n` +
-                            'Run `git push origin ' + branchName + ' --force` manually if the branch is behind.',
-                        ));
-                    }
-                    throw prErr;
-                }
+                const created = await createPullRequest({
+                    token,
+                    owner,
+                    repo,
+                    head: branchName,
+                    base: options.base,
+                    title,
+                    body: prBody,
+                });
+                console.log(chalk.green(`Created PR #${created.number}: ${chalk.underline(created.url)}`));
             }
 
             try {
