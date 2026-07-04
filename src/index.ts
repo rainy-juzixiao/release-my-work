@@ -684,7 +684,7 @@ program
                     console.log(chalk.dim(`Currently on '${currentRef}'. Switching to '${baseBranch}'...`));
                     await git.fetch(['origin', baseBranch]);
                     await git.raw(['checkout', '-B', baseBranch, `origin/${baseBranch}`]);
-                    if (token) {
+                    if (token !== undefined && token !== null && token !== '') {
                         const remotes = await git.getRemotes(true);
                         const originRemote = remotes.find(r => r.name === 'origin');
                         if (originRemote !== undefined && originRemote !== null) {
