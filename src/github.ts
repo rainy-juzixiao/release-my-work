@@ -68,6 +68,9 @@ export function parseGitHubRemote(remote: string): {owner: string; repo: string}
 export async function createPullRequest(options: GitHubCreatePROptions): Promise<GitHubPRResult> {
     const octokit = createClient(options.token);
 
+    // TODO: PR — Support draft flag from pullRequestConfig
+    //       Octokit's pulls.create accepts { ..., draft: boolean }.
+    //       Pass pullRequestConfig.draft to create draft PRs.
     const response = await octokit.rest.pulls.create({
         owner: options.owner,
         repo: options.repo,

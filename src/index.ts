@@ -30,8 +30,24 @@ import fs from 'node:fs';
 import semver from 'semver';
 import {scanGitHistory, openGit} from '#@/git';
 import {computeNextVersion, buildVersionCommitMessage, recommendBump} from '#@/version';
-import {createPullRequest, findPullRequest, updatePullRequest, parseGitHubRemote} from '#@/github';
+import {createPullRequest, findPullRequest, updatePullRequest, parseGitHubRemote, createClient} from '#@/github';
 import {parseCommit} from '#@/conventional';
+import {defaultConfig, loadConfigAsync, type ReleaseConfig} from '#@/config/index.js';
+
+/**
+ * Load the user config file when --config-path is provided.
+ * Returns `null` if no path is given, giving the caller full fallback control.
+ */
+async function resolveConfig(configPath: string | undefined): Promise<ReleaseConfig | null> {
+    if (configPath === undefined || configPath === null || configPath === '') {
+        return null;
+    }
+    return loadConfigAsync(configPath);
+}
+
+// TODO: PR — Merge user config with CLI flags in every command
+//       Once resolved, the config should be merged with command options.
+//       CLI flags take precedence over file config.
 
 const program = new Command();
 
@@ -43,10 +59,20 @@ program
 program
     .command('scan')
     .description('Scan git history and show conventional commits since the latest tag')
+    .option('-c, --config-path <path>', 'Path to config file')
     .option('-p, --path <path>', 'Repository path (default: current directory)')
     .option('-n, --max-count <number>', 'Maximum number of commits to scan', parseInt)
     .action(async (options) => {
         try {
+            let cfg = await resolveConfig(options.configPath);
+
+            if (cfg != null) {
+                console.log(`Successfully loaded config: ${options.configPath}`);
+            } else {
+                console.log(chalk.yellow('Warning: use default config'));
+                cfg = defaultConfig;
+            }
+
             const result = await scanGitHistory({
                 repoPath: options.path,
                 maxCount: options.maxCount,
@@ -60,23 +86,40 @@ program
             console.log(chalk.bold(`Latest tag: ${result.latestTag ?? '(none)'}`));
             console.log(chalk.bold(`Conventional commits found: ${result.commits.length}\n`));
 
-            for (const c of result.commits) {
-                const color = c.breaking
-                    ? 'red'
-                    : c.type === 'feat'
-                        ? 'green'
-                        : c.type === 'fix'
-                            ? 'yellow'
-                            : 'dim';
-                const scope = c.scope !== undefined && c.scope !== null && c.scope !== ''
-                    ? chalk.dim(`(${c.scope})`)
-                    : '';
-                const breaking = c.breaking ? chalk.red.bold('!') : '';
-                console.log(
-                    `  ${chalk.dim(c.hash.slice(0, 7))} ` +
-                    `${chalk[color](c.type)}${scope}${breaking}: ${c.description}`
-                );
+            {
+                console.log();
+
+                console.log(`release-search-depth ${cfg.releaseSearchDepth}`);
+                console.log(`commit-search-depth ${cfg.commitSearchDepth}`);
+                console.log(`sequential-calls ${cfg.sequentialCalls}`);
+
+                console.log();
             }
+
+            if (result.commits.length == 0) {
+                console.log("There is no new commit history detected.");
+            } else {
+                console.log("Scan Commit history");
+
+                for (const c of result.commits) {
+                    const color = c.breaking
+                        ? 'red'
+                        : c.type === 'feat'
+                            ? 'green'
+                            : c.type === 'fix'
+                                ? 'yellow'
+                                : 'dim';
+                    const scope = c.scope !== undefined && c.scope !== null && c.scope !== ''
+                        ? chalk.dim(`(${c.scope})`)
+                        : '';
+                    const breaking = c.breaking ? chalk.red.bold('!') : '';
+                    console.log(
+                        `  ${chalk.dim(c.hash.slice(0, 7))} ` +
+                        `${chalk[color](c.type)}${scope}${breaking}: ${c.description}`
+                    );
+                }
+            }
+
             console.log();
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : String(err);
@@ -88,10 +131,20 @@ program
 program
     .command('bump')
     .description('Compute the next version based on conventional commits since the latest tag')
+    .option('-c, --config-path <path>', 'Path to config file')
     .option('-p, --path <path>', 'Repository path (default: current directory)')
     .option('--dry-run', 'Show what would happen without making changes')
     .action(async (options) => {
         try {
+            let cfg = await resolveConfig(options.configPath);
+
+            if (cfg != null) {
+                console.log(`Successfully loaded config: ${options.configPath}`);
+            } else {
+                console.log(chalk.yellow('Warning: use default config'));
+                cfg = defaultConfig;
+            }
+
             const result = await scanGitHistory({repoPath: options.path});
 
             if (result.latestTag === undefined || result.latestTag === null || result.latestTag === '') {
@@ -144,11 +197,21 @@ program
     .description('Create a GitHub Pull Request for the release')
     .requiredOption('-o, --owner <owner>', 'GitHub repository owner')
     .requiredOption('-r, --repo <repo>', 'GitHub repository name')
+    .option('-c, --config-path <path>', 'Path to config file')
     .option('-t, --token <token>', 'GitHub token (defaults to GH_TOKEN or GITHUB_TOKEN env)')
     .option('-b, --base <branch>', 'Target branch (default: main)', 'main')
     .option('-p, --path <path>', 'Repository path (default: current directory)')
     .action(async (options) => {
         try {
+            let cfg = await resolveConfig(options.configPath);
+
+            if (cfg != null) {
+                console.log(`Successfully loaded config: ${options.configPath}`);
+            } else {
+                console.log(chalk.yellow('Warning: use default config'));
+                cfg = defaultConfig;
+            }
+
             const git = openGit(options.path);
             const currentBranch = (await git.branch()).current;
 
@@ -158,6 +221,11 @@ program
             const title = next
                 ? `chore(release): ${next.newVersion}`
                 : 'chore(release): manual release';
+            // TODO: PR — Use pullRequestConfig for title templating
+            //       Replace hardcoded title with pullRequestConfig.titlePattern:
+            //         titlePattern = "chore${scope}: release${component} ${version}"
+            //         → "chore(release): 1.2.3"
+            //       Template vars: ${scope}, ${component}, ${version}
 
             const commitList = (next !== undefined && next !== null ? next.commits : result.commits)
                 .map(c => {
@@ -168,6 +236,12 @@ program
                 })
                 .join('\n');
 
+            // TODO: PR — Use pullRequestConfig.header/body/footer for body
+            //       Currently the body is hardcoded.  Planned:
+            //         body = pullRequestConfig.header
+            //              + commitList
+            //              + pullRequestConfig.footer
+            //       header/footer support template interpolation (${version}, etc.).
             const body = [
                 `## ${next?.newVersion ?? 'Release'}\n`,
                 commitList,
@@ -175,6 +249,19 @@ program
                 '---',
                 'This Request Generated by release-my-work',
             ].join('\n');
+
+            // TODO: PR — Use pullRequestConfig.draft flag
+            //       createPullRequest accepts a draft parameter;
+            //       pass pullRequestConfig.draft instead of always
+            //       creating a normal PR.
+
+            // TODO: PR — Apply labels from pullRequestConfig.labels
+            //       After creation, add labels via the GitHub API
+            //       Issues.addLabels.
+
+            // TODO: PR — Handle pullRequestConfig.skipLabel
+            //       If the latest commit (or branch) contains the
+            //       skipLabel, skip PR creation.
 
             const pr = await createPullRequest({
                 token: options.token,
@@ -197,11 +284,21 @@ program
 program
     .command('release-pr')
     .description('Create or update a release Pull Request (CI-friendly)')
+    .option('-c, --config-path <path>', 'Path to config file')
     .option('-p, --path <path>', 'Repository path (default: current directory)')
     .option('-o, --owner <owner>', 'GitHub owner (parsed from git remote if omitted)')
     .option('-r, --repo <repo>', 'GitHub repo name (parsed from git remote if omitted)')
     .option('--base <branch>', 'Target branch (default: main)', 'main')
     .action(async (options) => {
+        let cfg = await resolveConfig(options.configPath);
+
+        if (cfg != null) {
+            console.log(`Successfully loaded config: ${options.configPath}`);
+        } else {
+            console.log(chalk.yellow('Warning: use default config'));
+            cfg = defaultConfig;
+        }
+
         const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
         if (token === undefined || token === null || token === '') {
             console.error(chalk.red('Error:'), 'GH_TOKEN or GITHUB_TOKEN environment variable is required.');
@@ -303,7 +400,20 @@ program
                 })
                 .join('\n');
 
-            const prBody = `## ${ver}\n\n### Changelog\n\n${commitLog}\n\n---\nThis pull request was created by \`release-my-work\`.\n\n:warning: **After approval and merge**, the publish workflow will automatically create the git tag \`v${ver}\` and a GitHub Release.`;
+            const header = cfg.pullRequest.header === null ? "The Release Pull Request Is Created\n-----------------\n" : cfg.pullRequest.header;
+
+            const prBody = `${header}\n## ${ver}\n\n### Changelog\n\n${commitLog}\n\n---\nThis pull request was created by \`release-my-work\`.\n\n:warning: **After approval and merge**, the publish workflow will automatically create the git tag \`v${ver}\` and a GitHub Release.`;
+            // TODO: PR — Use pullRequestConfig for titlePattern, header, footer
+            //       Same principle as the `pr` command: interpolate templates
+            //       from user config instead of hardcoded text.
+
+            // TODO: PR — Support pullRequestConfig.date
+            //       If pullRequestConfig.date === true, insert today's date
+            //       in the body header (e.g. "## 2026-07-04").
+
+            // TODO: PR — Support pullRequestConfig.draft flag
+            //       createPullRequest / updatePullRequest accept a draft
+            //       parameter. Read it from user config.
 
             const remotes = await git.getRemotes(true);
             const originRemote = remotes.find(r => r.name === 'origin');
@@ -372,6 +482,7 @@ program
 program
     .command('auto')
     .description('Run bump + PR in one go (bump version, push, create pull request)')
+    .option('-c, --config-path <path>', 'Path to config file')
     .requiredOption('-o, --owner <owner>', 'GitHub repository owner')
     .requiredOption('-r, --repo <repo>', 'GitHub repository name')
     .option('-t, --token <token>', 'GitHub token (defaults to GH_TOKEN or GITHUB_TOKEN env)')
@@ -379,6 +490,15 @@ program
     .option('-p, --path <path>', 'Repository path (default: current directory)')
     .option('--dry-run', 'Show what would happen without making changes')
     .action(async (options) => {
+        let cfg = await resolveConfig(options.configPath);
+
+        if (cfg != null) {
+            console.log(`Successfully loaded config: ${options.configPath}`);
+        } else {
+            console.log(chalk.yellow('Warning: use default config'));
+            cfg = defaultConfig;
+        }
+
         try {
             const result = await scanGitHistory({repoPath: options.path});
             const next = computeNextVersion(result.latestTag, result.commits);
@@ -432,7 +552,15 @@ program
                 })
                 .join('\n');
 
+            // TODO: PR — Use pullRequestConfig for body (auto)
+            //       Same as `pr` and `release-pr` commands: replace hardcoded body
+            //       with header + commitList + footer from config, plus draft,
+            //       labels, releaseLabel, skipLabel and date.
+
+            const header = cfg.pullRequest.header === null ? "The Release Pull Request Is Created\n-----------------\n" : cfg.pullRequest.header;
+
             const body = [
+                header,
                 `## ${next.newVersion}\n`,
                 commitList,
                 '',
@@ -451,6 +579,83 @@ program
             });
 
             console.log(chalk.green(`Pull Request created: ${chalk.underline(pr.url)}`));
+        } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            console.error(chalk.red('Error:'), errorMessage);
+            process.exit(1);
+        }
+    });
+
+program
+    .command('release-publish')
+    .description('Tag, generate changelog, and create a GitHub Release (post-merge)')
+    .requiredOption('-v, --version <version>', 'Version to publish (e.g. 1.2.3)')
+    .option('-t, --token <token>', 'GitHub token (defaults to GH_TOKEN or GITHUB_TOKEN env)')
+    .option('-r, --repo <repo>', 'GitHub repo in owner/repo format (defaults to GITHUB_REPOSITORY env)')
+    .option('-p, --path <path>', 'Repository path (default: current directory)')
+    .option('--no-delete-branch', 'Skip deleting the release branch after publishing')
+    .action(async (options) => {
+        const token = options.token ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
+        if (token === undefined || token === null || token === '') {
+            console.error(chalk.red('Error:'), 'GH_TOKEN or GITHUB_TOKEN is required.');
+            process.exit(1);
+        }
+
+        const repo = options.repo ?? process.env.GITHUB_REPOSITORY;
+        if (repo === undefined || repo === null || repo === '') {
+            console.error(chalk.red('Error:'), '--repo or GITHUB_REPOSITORY is required.');
+            process.exit(1);
+        }
+
+        const [owner, repoName] = repo.split('/');
+
+        try {
+            const git = openGit(options.path);
+            const ver = options.version;
+
+            const tags = await git.tags();
+            if (tags.all.includes(`v${ver}`)) {
+                console.log(chalk.yellow(`Tag v${ver} already exists. Nothing to publish.`));
+                return;
+            }
+
+            await git.addTag(`v${ver}`);
+            await git.push('origin', `v${ver}`);
+            console.log(chalk.green(`Tagged v${ver}`));
+
+            const scan = await scanGitHistory({repoPath: options.path});
+            const commitBullets = scan.commits
+                .map(c => {
+                    const scope = c.scope != null && c.scope !== '' ? `(${c.scope})` : '';
+                    const breaking = c.breaking ? '!' : '';
+                    return `- ${c.type}${scope}${breaking}: ${c.description}`;
+                })
+                .join('\n');
+
+            const changelog = `## ${ver}\n\n${commitBullets}`;
+            console.log(chalk.dim('\nChangelog:'));
+            console.log(changelog);
+
+            const octokit = createClient(token);
+            const release = await octokit.rest.repos.createRelease({
+                owner,
+                repo: repoName,
+                tag_name: `v${ver}`,
+                name: `v${ver}`,
+                body: changelog,
+            });
+            console.log(chalk.green(`Release created: ${chalk.underline(release.data.html_url)}`));
+
+            if (options.deleteBranch !== false) {
+                try {
+                    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+                    // @ts-expect-error
+                    await git.push('origin', '--delete', `release/${ver}`);
+                    console.log(chalk.dim(`Deleted branch release/${ver}`));
+                } catch {
+                    console.log(chalk.yellow(`Could not delete release/${ver} (may not exist).`));
+                }
+            }
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : String(err);
             console.error(chalk.red('Error:'), errorMessage);
