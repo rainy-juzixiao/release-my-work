@@ -458,7 +458,7 @@ program
             await git.commit(`chore(release): ${ver}`);
 
             console.log(chalk.dim(`Pushing ${branchName}...`));
-            await git.push('origin', branchName, ['--force-with-lease']);
+            await git.push('origin', branchName);
 
             const title = `chore(release): ${ver}`;
 
@@ -466,16 +466,31 @@ program
                 const updated = await updatePullRequest(owner, repo, existingPr.number, title, prBody, token);
                 console.log(chalk.green(`Updated PR #${updated.number}: ${chalk.underline(updated.url)}`));
             } else {
-                const created = await createPullRequest({
-                    token,
-                    owner,
-                    repo,
-                    head: branchName,
-                    base: options.base,
-                    title,
-                    body: prBody,
-                });
-                console.log(chalk.green(`Created PR #${created.number}: ${chalk.underline(created.url)}`));
+                try {
+                    const created = await createPullRequest({
+                        token,
+                        owner,
+                        repo,
+                        head: branchName,
+                        base: options.base,
+                        title,
+                        body: prBody,
+                    });
+                    console.log(chalk.green(`Created PR #${created.number}: ${chalk.underline(created.url)}`));
+                } catch (prErr: unknown) {
+                    // 422 from GitHub means the branch has no diff against base
+                    if (prErr instanceof Error && prErr.message.includes('422')) {
+                        const sha = (await git.log(['-1', '--format=%H'])).latest?.hash ?? '?';
+                        const status = await git.status();
+                        console.error(chalk.red(
+                            `GitHub rejected the PR: no commits between ${options.base} and ${branchName}.\n` +
+                            `  Local HEAD: ${sha}\n` +
+                            `  Uncommitted: ${status.files.map(f => f.path).join(', ') || '(none)'}\n` +
+                            'Run `git push origin ' + branchName + ' --force` manually if the branch is behind.',
+                        ));
+                    }
+                    throw prErr;
+                }
             }
 
             try {
