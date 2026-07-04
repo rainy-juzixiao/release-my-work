@@ -69,9 +69,18 @@ jobs:
           VER="${{ steps.version.outputs.version }}"
           MERGE_SHA="${{ github.event.pull_request.merge_commit_sha }}"
 
-          git tag "v${VER}" "$MERGE_SHA"
-          git push origin "v${VER}"
-          echo "Tagged v${VER} at ${MERGE_SHA}"
+          if [ -z "$MERGE_SHA" ]; then
+            # Squash merge — no merge commit; tag HEAD instead
+            MERGE_SHA="HEAD"
+          fi
+
+          if git rev-parse "v${VER}" &>/dev/null; then
+            echo "Tag v${VER} already exists. Skipping."
+          else
+            git tag "v${VER}" "$MERGE_SHA"
+            git push origin "v${VER}"
+            echo "Tagged v${VER} at ${MERGE_SHA}"
+          fi
 
       - name: Create GitHub Release
         env:
