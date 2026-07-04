@@ -1,7 +1,7 @@
 {
   "name": "release-my-work",
   "version": "1.0.0",
-  "description": "Scan git history for Conventional Commits, bump version, and create GitHub Pull Requests",
+  "description": "A small tool can scan git history for Conventional Commits, bump version, and create GitHub Pull Requests",
   "type": "module",
   "bin": {
     "release-my-work": "dist/index.js"
