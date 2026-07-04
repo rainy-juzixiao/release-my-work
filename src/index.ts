@@ -643,6 +643,7 @@ program
     .option('-t, --token <token>', 'GitHub token (defaults to GH_TOKEN or GITHUB_TOKEN env)')
     .option('-r, --repo <repo>', 'GitHub repo in owner/repo format (defaults to GITHUB_REPOSITORY env)')
     .option('-p, --path <path>', 'Repository path (default: current directory)')
+    .option('-b, --base <branch>', 'Base branch to publish from (default: main)', 'main')
     .option('--no-delete-branch', 'Skip deleting the release branch after publishing')
     .action(async (options) => {
         const token = options.token ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
@@ -661,6 +662,33 @@ program
 
         try {
             const git = openGit(options.path);
+
+            // Ensure we're on the base branch (e.g. main) for publishing.
+            // After a PR merge, the workflow may be running on a release branch
+            // or merge commit — switch to base so tag/release/scan operates correctly.
+            const baseBranch = options.base ?? 'main';
+            try {
+                const currentRef = (await git.raw(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+                if (currentRef !== baseBranch) {
+                    console.log(chalk.dim(`Currently on '${currentRef}'. Switching to '${baseBranch}'...`));
+                    await git.fetch(['origin', baseBranch]);
+                    await git.raw(['checkout', '-B', baseBranch, `origin/${baseBranch}`]);
+                    if (token) {
+                        const remotes = await git.getRemotes(true);
+                        const originRemote = remotes.find(r => r.name === 'origin');
+                        if (originRemote !== undefined && originRemote !== null) {
+                            const pushUrl = originRemote.refs.push ?? originRemote.refs.fetch;
+                            const authedUrl = pushUrl.replace('https://', `https://x-access-token:${token}@`);
+                            if (authedUrl !== pushUrl) {
+                                await git.remote(['set-url', 'origin', authedUrl]);
+                            }
+                        }
+                    }
+                }
+            } catch {
+                console.log(chalk.yellow(`Could not switch to '${baseBranch}', continuing with current branch.`));
+            }
+
             let ver = options.ver;
 
             // Auto-detect version when not explicitly provided

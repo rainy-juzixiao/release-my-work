@@ -84,4 +84,5 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           node dist/index.js release-publish \
-            --version ${{ steps.version.outputs.version }}
+            --ver ${{ steps.version.outputs.version }} \
+            --base main
