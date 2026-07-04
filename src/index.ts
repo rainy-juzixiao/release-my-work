@@ -440,15 +440,10 @@ program
                 }
             }
 
-            const currentBranch = (await git.branch()).current;
-            try {
-                await git.branch(['-D', branchName]);
-            } catch {
-                /* branch doesn't exist locally */
-            }
+            const currentBranch = (await git.raw(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
 
-            // Create branch, write version file, commit, push — using raw git
-            // to ensure the commit is actually created and pushed.
+            // Delete stale local branch if it exists, then create fresh from HEAD
+            await git.raw(['branch', '-D', branchName]).catch(() => { /* ok */ });
             await git.raw(['checkout', '-b', branchName]);
 
             const repoRoot = options.path ?? process.cwd();
