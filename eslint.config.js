@@ -27,9 +27,10 @@ import tseslint from 'typescript-eslint';
 export default tseslint.config(
     {
         ignores: [
+            'dist/**',
             'src/**/*.test.ts',
             'src/frontend/generated/*',
-            "eslint.config.js"
+            'eslint.config.js',
         ]
     },
     eslint.configs.recommended,

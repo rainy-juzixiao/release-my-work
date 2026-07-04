@@ -84,3 +84,9 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "v${VER}" \
             --notes "${NOTES}"
+
+      - name: Delete release branch
+        run: |
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          git push origin --delete "$BRANCH"
+          echo "Deleted branch: $BRANCH"

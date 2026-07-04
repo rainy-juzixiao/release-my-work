@@ -38,7 +38,6 @@ program
     .description('Scan git history for Conventional Commits, bump version, and create GitHub Pull Requests')
     .version('1.0.0');
 
-// ─── scan ───────────────────────────────────────────────────────────────────
 program
     .command('scan')
     .description('Scan git history and show conventional commits since the latest tag')
@@ -84,7 +83,6 @@ program
         }
     });
 
-// ─── bump ───────────────────────────────────────────────────────────────────
 program
     .command('bump')
     .description('Compute the next version based on conventional commits since the latest tag')
@@ -139,7 +137,6 @@ program
         }
     });
 
-// ─── pr ─────────────────────────────────────────────────────────────────────
 program
     .command('pr')
     .description('Create a GitHub Pull Request for the release')
@@ -195,7 +192,6 @@ program
         }
     });
 
-// ─── release-pr ─────────────────────────────────────────────────────────────
 program
     .command('release-pr')
     .description('Create or update a release Pull Request (CI-friendly)')
@@ -213,25 +209,26 @@ program
         try {
             const git = openGit(options.path);
 
-            // ── Resolve owner/repo from git remote ──
             let owner = options.owner;
             let repo = options.repo;
-            if (!owner || !repo) {
+            if (owner === undefined || owner === null || owner === ''
+                || repo === undefined || repo === null || repo === '') {
                 const remotes = await git.getRemotes(true);
                 const origin = remotes.find(r => r.name === 'origin');
-                if (!origin) {
+                if (origin === undefined || origin === null) {
                     console.error(chalk.red('Error:'), 'No git remote "origin" found.');
                     process.exit(1);
                 }
-                const parsed = parseGitHubRemote(origin.refs.push || origin.refs.fetch);
+                const pushUrl = origin.refs.push !== undefined && origin.refs.push !== null && origin.refs.push !== ''
+                    ? origin.refs.push
+                    : origin.refs.fetch;
+                const parsed = parseGitHubRemote(pushUrl);
                 owner = parsed.owner;
                 repo = parsed.repo;
             }
 
-            // ── 1. Scan conventional commits ──
             console.log(chalk.dim('Scanning git history...'));
             const result = await scanGitHistory({repoPath: options.path});
-            const skipBump = result.latestTag === null || result.latestTag === '';
 
             const next = computeNextVersion(result.latestTag, result.commits);
             if (next === null || next === undefined) {
@@ -242,19 +239,23 @@ program
             const ver = next.newVersion;
             const branchName = `release/${ver}`;
 
-            // ── 2. Check for existing PR ──
+            const tags = await git.tags();
+            if (tags.all.includes(`v${ver}`)) {
+                console.log(chalk.dim(`Tag v${ver} already exists. Version already released.`));
+                return;
+            }
+
             console.log(chalk.dim(`Checking existing PR for ${branchName}...`));
             const existingPr = await findPullRequest(owner, repo, branchName, token);
 
             if (existingPr !== null && existingPr !== undefined) {
                 if (existingPr.state === 'closed' || existingPr.state === 'merged') {
-                    console.log(chalk.yellow(`PR #${existingPr.number} for ${branchName} is already ${existingPr.state}. Skipping.`));
+                    console.log(chalk.yellow(`PR #${existingPr.number} for ${branchName} is ${existingPr.state} and tag v${ver} is missing. The previous release may still be in progress. Skipping.`));
                     return;
                 }
                 console.log(chalk.dim(`Found open PR #${existingPr.number}. Will update.`));
             }
 
-            // ── 3. Build PR content ──
             const commitLog = result.commits
                 .map(c => {
                     const scope = c.scope !== undefined && c.scope !== null && c.scope !== ''
@@ -267,11 +268,12 @@ program
 
             const prBody = `## ${ver}\n\n### Changelog\n\n${commitLog}\n\n---\nThis pull request was created by \`release-my-work\`.\n\n:warning: **After approval and merge**, the publish workflow will automatically create the git tag \`v${ver}\` and a GitHub Release.`;
 
-            // ── 4. Set up git remote with token for auth ──
             const remotes = await git.getRemotes(true);
             const originRemote = remotes.find(r => r.name === 'origin');
-            if (originRemote) {
-                const pushUrl = originRemote.refs.push || originRemote.refs.fetch;
+            if (originRemote !== undefined && originRemote !== null) {
+                const pushUrl = originRemote.refs.push !== undefined && originRemote.refs.push !== null && originRemote.refs.push !== ''
+                    ? originRemote.refs.push
+                    : originRemote.refs.fetch;
                 const authedUrl = pushUrl.replace(
                     'https://',
                     `https://x-access-token:${token}@`,
@@ -281,17 +283,14 @@ program
                 }
             }
 
-            // ── 5. Create / update release branch ──
-            // Create branch from the current HEAD
             const currentBranch = (await git.branch()).current;
             try {
                 await git.branch(['-D', branchName]);
             } catch {
-                // branch doesn't exist locally — fine
+                /* branch doesn't exist locally */
             }
             await git.checkoutLocalBranch(branchName);
 
-            // Update package.json version
             const pkgPath = `${options.path ?? process.cwd()}/package.json`;
             const pkgRaw = fs.readFileSync(pkgPath, 'utf-8');
             const pkg = JSON.parse(pkgRaw) as Record<string, unknown>;
@@ -301,11 +300,9 @@ program
             await git.add('package.json');
             await git.commit(`chore(release): ${ver}`);
 
-            // ── 6. Push branch ──
             console.log(chalk.dim(`Pushing ${branchName}...`));
             await git.push('origin', branchName, ['--force-with-lease']);
 
-            // ── 7. Create or update PR ──
             const title = `chore(release): ${ver}`;
 
             if (existingPr !== null && existingPr !== undefined) {
@@ -324,7 +321,6 @@ program
                 console.log(chalk.green(`Created PR #${created.number}: ${chalk.underline(created.url)}`));
             }
 
-            // Restore original branch
             try { await git.checkout(currentBranch); } catch { /* ok */ }
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : String(err);
@@ -333,7 +329,6 @@ program
         }
     });
 
-// ─── auto ───────────────────────────────────────────────────────────────────
 program
     .command('auto')
     .description('Run bump + PR in one go (bump version, push, create pull request)')
@@ -348,7 +343,7 @@ program
             const result = await scanGitHistory({repoPath: options.path});
             const next = computeNextVersion(result.latestTag, result.commits);
 
-            if (!next) {
+            if (next === null || next === undefined) {
                 console.log(chalk.yellow('No version bump warranted. Nothing to release.'));
                 return;
             }
@@ -356,7 +351,7 @@ program
             const from = result.latestTag ?? 'initial';
             console.log(chalk.bold(`${from} → ${chalk.green(next.newVersion)} (${next.bump})`));
 
-            if (options.dryRun) {
+            if (options.dryRun === true) {
                 console.log(chalk.dim('(dry-run — stopping before commit & PR)\n'));
                 return;
             }
@@ -364,13 +359,16 @@ program
             const git = openGit(options.path);
             const msg = buildVersionCommitMessage(next.newVersion, next.bump);
 
-            // Set remote auth if token is provided
-            const token = options.token ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
-            if (token) {
+            const token = options.token !== undefined && options.token !== null && options.token !== ''
+                ? options.token
+                : (process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN);
+            if (token !== undefined && token !== null && token !== '') {
                 const remotes = await git.getRemotes(true);
                 const origin = remotes.find(r => r.name === 'origin');
-                if (origin) {
-                    const pushUrl = origin.refs.push || origin.refs.fetch;
+                if (origin !== undefined && origin !== null) {
+                    const pushUrl = origin.refs.push !== undefined && origin.refs.push !== null && origin.refs.push !== ''
+                        ? origin.refs.push
+                        : origin.refs.fetch;
                     const authedUrl = pushUrl.replace('https://', `https://x-access-token:${token}@`);
                     if (authedUrl !== pushUrl) {
                         await git.remote(['set-url', 'origin', authedUrl]);
@@ -387,7 +385,9 @@ program
 
             const commitList = next.commits
                 .map(c => {
-                    const scope = c.scope ? `(${c.scope})` : '';
+                    const scope = c.scope !== undefined && c.scope !== null && c.scope !== ''
+                        ? `(${c.scope})`
+                        : '';
                     return `- ${c.type}${scope}: ${c.description}`;
                 })
                 .join('\n');

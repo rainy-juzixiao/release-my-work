@@ -67,6 +67,7 @@ export async function getLatestTag(git: SimpleGit): Promise<string | null> {
 export async function scanGitHistory(options: GitScanOptions = {}): Promise<GitScanResult> {
     const git = openGit(options.repoPath);
     const currentBranch = (await git.branch()).current;
+    const latestTag = await getLatestTag(git);
 
     // Determine log range
     let logRange: string[];
@@ -79,6 +80,8 @@ export async function scanGitHistory(options: GitScanOptions = {}): Promise<GitS
         logRange = [`${options.from}..${options.to}`];
     } else if (options.from !== undefined && options.from !== null && options.from !== '') {
         logRange = [`${options.from}..HEAD`];
+    } else if (latestTag !== undefined && latestTag !== null && latestTag !== '') {
+        logRange = [`${latestTag}..HEAD`];
     } else {
         logRange = [];
     }
@@ -93,7 +96,5 @@ export async function scanGitHistory(options: GitScanOptions = {}): Promise<GitS
         }
     }
 
-    const latestTag = await getLatestTag(git);
-
-    return {commits, latestTag, currentBranch};
+    return { commits, latestTag, currentBranch };
 }

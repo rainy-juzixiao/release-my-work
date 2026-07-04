@@ -52,8 +52,10 @@ export function bumpLevel(type: string, breaking: boolean): 'major' | 'minor' | 
 }
 
 export function parseCommit(raw: string, hash: string): ConventionalCommit | null {
-    const headerMatch = raw.match(
-        /^(?<type>\w+)(?:\((?<scope>[^)]*)\))?(?<breaking>!)?\s*:\s*(?<description>.+)$/m
+    // Only parse the first line — body/footer lines are NOT commit headers
+    const firstLine = raw.split('\n')[0];
+    const headerMatch = firstLine.match(
+        /^(?<type>\w+)(?:\((?<scope>[^)]*)\))?(?<breaking>!)?\s*:\s*(?<description>.+)$/
     );
 
     if (!headerMatch) {
