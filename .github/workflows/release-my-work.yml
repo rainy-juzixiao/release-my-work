@@ -40,3 +40,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: node dist/index.js release-pr
+
+      - name: Publish merged release
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          VER=$(git log --merges --oneline -5 \
+            | grep -oP 'release/\K\d+\.\d+\.\d+' \
+            | head -1 || true)
+          if [ -n "$VER" ]; then
+            echo "Detected merged version: $VER"
+            node dist/index.js release-publish --version "$VER"
+          else
+            echo "No merged release/ branch detected. Skipping publish."
+          fi

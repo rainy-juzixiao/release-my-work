@@ -588,7 +588,7 @@ program
 
 program
     .command('release-publish')
-    .description('Tag, generate changelog, and create a GitHub Release (post-merge)')
+    .description('Tag, generate changelog, and create a GitHub Release after a PR merge')
     .requiredOption('-v, --version <version>', 'Version to publish (e.g. 1.2.3)')
     .option('-t, --token <token>', 'GitHub token (defaults to GH_TOKEN or GITHUB_TOKEN env)')
     .option('-r, --repo <repo>', 'GitHub repo in owner/repo format (defaults to GITHUB_REPOSITORY env)')
@@ -613,16 +613,33 @@ program
             const git = openGit(options.path);
             const ver = options.version;
 
+            // Guard: tag must not already exist
             const tags = await git.tags();
             if (tags.all.includes(`v${ver}`)) {
                 console.log(chalk.yellow(`Tag v${ver} already exists. Nothing to publish.`));
                 return;
             }
 
+            // Check if the release PR was merged into current branch
+            const recentLog = await git.log(['--merges', '--oneline', '-10']);
+            const releaseMerge = recentLog.all.find(
+                e => e.message.includes(`release/${ver}`),
+            );
+            if (!releaseMerge) {
+                console.log(chalk.yellow(
+                    `No merge commit for release/${ver} found in recent history. ` +
+                    'Publishing anyway. Use --no-delete-branch if the branch was already cleaned up.',
+                ));
+            } else {
+                console.log(chalk.dim(`Found merge commit: ${releaseMerge.hash} ${releaseMerge.message}`));
+            }
+
+            // Tag HEAD
             await git.addTag(`v${ver}`);
             await git.push('origin', `v${ver}`);
             console.log(chalk.green(`Tagged v${ver}`));
 
+            // Generate changelog
             const scan = await scanGitHistory({repoPath: options.path});
             const commitBullets = scan.commits
                 .map(c => {
@@ -636,24 +653,25 @@ program
             console.log(chalk.dim('\nChangelog:'));
             console.log(changelog);
 
+            // Create GitHub Release
             const octokit = createClient(token);
-            const release = await octokit.rest.repos.createRelease({
+            const releaseResp = await octokit.rest.repos.createRelease({
                 owner,
                 repo: repoName,
                 tag_name: `v${ver}`,
                 name: `v${ver}`,
                 body: changelog,
             });
-            console.log(chalk.green(`Release created: ${chalk.underline(release.data.html_url)}`));
+            console.log(chalk.green(`Release created: ${chalk.underline(releaseResp.data.html_url)}`));
 
+            // Delete release branch
             if (options.deleteBranch !== false) {
+                const branchName = `release/${ver}`;
                 try {
-                    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-                    // @ts-expect-error
-                    await git.push('origin', '--delete', `release/${ver}`);
-                    console.log(chalk.dim(`Deleted branch release/${ver}`));
+                    await git.push(['origin', '--delete', branchName]);
+                    console.log(chalk.dim(`Deleted branch ${branchName}`));
                 } catch {
-                    console.log(chalk.yellow(`Could not delete release/${ver} (may not exist).`));
+                    console.log(chalk.yellow(`Could not delete ${branchName} (may not exist).`));
                 }
             }
         } catch (err: unknown) {
