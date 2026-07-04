@@ -361,40 +361,41 @@ program
                         return;
                     }
 
-                    let newCommits: Array<{ hash: string; raw: string; type: string; scope: string | null; breaking: boolean; description: string; body: string[]; footers: Array<{ token: string; value: string }> }> = [];
+                    // Try to find commits that were merged after this PR.
+                    // If merge_commit_sha is not available locally (squash merge,
+                    // shallow clone), skip advancing to avoid double-counting
+                    // commits already included in the initial scan.
                     try {
                         const log = await git.log([`${existingPr.merge_commit_sha}..HEAD`]);
-                        newCommits = log.all
+                        const newCommits: Array<{ hash: string; raw: string; type: string; scope: string | null; breaking: boolean; description: string; body: string[]; footers: Array<{ token: string; value: string }> }> = log.all
                             .map(e => parseCommit(e.message, e.hash))
                             .filter((c): c is NonNullable<typeof c> => c !== null && c !== undefined);
+
+                        const newBump = recommendBump(newCommits);
+                        if (newBump === null) {
+                            console.log(chalk.dim(`No new conventional commits since ${branchName} was merged. Skipping.`));
+                            return;
+                        }
+
+                        const baseline = semver.parse(ver);
+                        if (baseline === null) {
+                            console.log(chalk.yellow(`Cannot parse version ${ver}. Skipping.`));
+                            return;
+                        }
+
+                        ver = baseline.inc(newBump).version;
+                        branchName = `release/${ver}`;
+                        commitsForPR = newCommits;
+                        console.log(chalk.dim(`Advancing to ${ver} based on post-merge commits.`));
+
+                        if (tags.all.includes(`v${ver}`)) {
+                            console.log(chalk.dim(`Tag v${ver} already exists. Skipping.`));
+                            return;
+                        }
                     } catch {
-                        // merge_commit_sha not found locally (squash merge, shallow clone, etc.)
-                        console.log(chalk.dim(`merge_commit_sha ${existingPr.merge_commit_sha} not found locally. Falling back to recent commit scan.`));
-                        const fallbackLog = await git.log({ maxCount: 50 });
-                        newCommits = fallbackLog.all
-                            .map(e => parseCommit(e.message, e.hash))
-                            .filter((c): c is NonNullable<typeof c> => c !== null && c !== undefined);
-                    }
-                    const newBump = recommendBump(newCommits);
-
-                    if (newBump === null) {
-                        console.log(chalk.dim(`No new conventional commits since ${branchName} was merged. Skipping.`));
-                        return;
-                    }
-
-                    const baseline = semver.parse(ver);
-                    if (baseline === null) {
-                        console.log(chalk.yellow(`Cannot parse version ${ver}. Skipping.`));
-                        return;
-                    }
-
-                    ver = baseline.inc(newBump).version;
-                    branchName = `release/${ver}`;
-                    commitsForPR = newCommits;
-                    console.log(chalk.dim(`Advancing to ${ver} based on post-merge commits.`));
-
-                    if (tags.all.includes(`v${ver}`)) {
-                        console.log(chalk.dim(`Tag v${ver} already exists. Skipping.`));
+                        console.log(chalk.dim(`merge_commit_sha ${existingPr.merge_commit_sha} not found locally.`));
+                        console.log(chalk.yellow('Cannot determine post-merge commits from a shallow or squash-merge history.'));
+                        console.log(chalk.dim('Skipping automatic version advancement. Release any new commits manually.'));
                         return;
                     }
                 }
