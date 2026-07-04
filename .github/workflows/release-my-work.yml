@@ -38,11 +38,10 @@ jobs:
 
       - name: Create / Update Release Pull Request
         env:
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           set -euo pipefail
 
-          # ─── 1. Scan conventional commits since latest tag ───
           echo "::group::Scan conventional commits"
           SCAN_OUTPUT=$(FORCE_COLOR=0 npx tsx src/index.ts scan 2>&1 || true)
           echo "$SCAN_OUTPUT"
