@@ -479,19 +479,22 @@ program
             if (versionChanged) {
                 await git.raw(['add', versionFile]);
                 await git.raw(['commit', '-m', `chore(release): ${ver}`]);
-
-                // Verify the branch is actually ahead of base before pushing
-                const baseSha = (await git.raw(['rev-parse', options.base ?? 'main'])).trim();
-                const branchSha = (await git.raw(['rev-parse', 'HEAD'])).trim();
-                if (baseSha === branchSha) {
-                    console.error(chalk.red(
-                        `Version bump commit was not created. HEAD is still at ${baseSha}.\n` +
-                        'This usually means the file was already up-to-date. Check your working tree.',
-                    ));
-                    process.exit(1);
-                }
             } else {
-                console.log(chalk.dim(`Proceeding without version commit — branch already reflects ${ver}.`));
+                // Branch would be identical to base — create an empty commit
+                // so GitHub allows creating a Pull Request.
+                console.log(chalk.dim(`Version ${ver} is already set in ${versionFile}. Creating placeholder commit for PR branch.`));
+                await git.raw(['commit', '--allow-empty', '-m', `chore(release): ${ver}`]);
+            }
+
+            // Verify the branch is actually ahead of base before pushing
+            const baseSha = (await git.raw(['rev-parse', options.base ?? 'main'])).trim();
+            const branchSha = (await git.raw(['rev-parse', 'HEAD'])).trim();
+            if (baseSha === branchSha) {
+                console.error(chalk.red(
+                    `Version bump commit was not created. HEAD is still at ${baseSha}.\n` +
+                    'This usually means the file was already up-to-date. Check your working tree.',
+                ));
+                process.exit(1);
             }
 
             console.log(chalk.dim(`Pushing ${branchName}...`));
@@ -636,7 +639,7 @@ program
 program
     .command('release-publish')
     .description('Tag, generate changelog, and create a GitHub Release after a PR merge')
-    .option('-v, --version <version>', 'Version to publish (auto-detected from last merged release/ branch if omitted)')
+    .option('-v, --ver <version>', 'Version to publish (auto-detected from last merged release/ branch if omitted)')
     .option('-t, --token <token>', 'GitHub token (defaults to GH_TOKEN or GITHUB_TOKEN env)')
     .option('-r, --repo <repo>', 'GitHub repo in owner/repo format (defaults to GITHUB_REPOSITORY env)')
     .option('-p, --path <path>', 'Repository path (default: current directory)')
@@ -658,18 +661,43 @@ program
 
         try {
             const git = openGit(options.path);
-            let ver = options.version;
+            let ver = options.ver;
 
+            // Auto-detect version when not explicitly provided
             if (ver === undefined || ver === null || ver === '') {
-                const mergeLog = await git.log(['--merges', '--oneline', '-5']);
-                const match = mergeLog.all
+                const headLog = await git.log(['--oneline', '-10']);
+                const messages = headLog.all.map(e => e.message);
+
+                // Strategy 1: find merge commits containing "release/X.X.X"
+                const mergeLog = await git.log(['--merges', '--oneline', '-10']);
+                let match = mergeLog.all
                     .map(e => e.message.match(/release\/(\d+\.\d+\.\d+)/))
                     .find(Boolean);
+
+                // Strategy 2: scan all recent commits for "release/X.X.X"
+                // (handles squash merges where the branch name appears in the commit body)
+                if (!match) {
+                    match = messages
+                        .map(m => m.match(/release\/(\d+\.\d+\.\d+)/))
+                        .find(Boolean);
+                }
+
+                // Strategy 3: look for any semver X.X.X in HEAD commit message
+                // (handles squash merges with default commit message like "chore(release): X.X.X (#N)")
+                if (!match) {
+                    const headMsg = messages[0] ?? '';
+                    // Only match if it appears to be a release-related commit
+                    if (/release|chore|bump|version/i.test(headMsg)) {
+                        match = headMsg.match(/(\d+\.\d+\.\d+)/);
+                    }
+                }
+
                 if (match) {
                     ver = match[1];
-                    console.log(chalk.dim(`Auto-detected version ${ver} from merged release branch.`));
+                    console.log(chalk.dim(`Auto-detected version ${ver} from recent commits.`));
                 } else {
-                    console.log(chalk.dim('No merged release/ branch found. Nothing to publish.'));
+                    console.log(chalk.dim('Could not auto-detect version. No merged release/ branch found.'));
+                    console.log(chalk.dim('Pass --ver <version> explicitly.'));
                     return;
                 }
             }
@@ -680,18 +708,22 @@ program
                 return;
             }
 
-            const recentLog = await git.log(['--merges', '--oneline', '-10']);
-            const releaseMerge = recentLog.all.find(
-                e => e.message.includes(`release/${ver}`),
+            // Verify the merge exists: check merge commits first, then any recent commit
+            const recentLog = await git.log(['--oneline', '-10']);
+            const releaseCommit = recentLog.all.find(
+                e => e.message.includes(`release/${ver}`)
+                    || e.message.includes(`v${ver}`)
+                    || (e.message.includes(ver) && /release|chore|bump|version/i.test(e.message)),
             );
-            if (!releaseMerge) {
+            if (!releaseCommit) {
                 console.error(chalk.red(
-                    `Cannot publish v${ver}: no merge commit for release/${ver} in recent history. ` +
+                    `Cannot publish v${ver}: no commit for release/${ver} in recent history. ` +
                     'The PR must be merged before publishing.',
                 ));
                 process.exit(1);
             }
-            console.log(chalk.green(`Release PR merged: ${releaseMerge.hash} ${releaseMerge.message}`));
+            const refType = releaseCommit.message.includes('Merge') ? 'merge commit' : 'commit';
+            console.log(chalk.green(`Release PR merged: ${releaseCommit.hash} ${releaseCommit.message} (${refType})`));
 
             await git.addTag(`v${ver}`);
             await git.push(['origin', `v${ver}`],);
