@@ -353,7 +353,7 @@ program
                     console.log(chalk.dim(`Found open PR #${existingPr.number}. Will update.`));
                 } else {
                     // PR closed/merged but tag missing — this version was already taken.
-                    // Scan post-merge commits and advance to the next version.
+                    // Advance past all versions that have been consumed by closed PRs.
                     console.log(chalk.dim(`PR #${existingPr.number} for ${branchName} is ${existingPr.state}.`));
 
                     if (existingPr.merge_commit_sha === undefined || existingPr.merge_commit_sha === null || existingPr.merge_commit_sha === '') {
@@ -361,22 +361,30 @@ program
                         return;
                     }
 
-                    // Try to find commits that were merged after this PR.
-                    // If merge_commit_sha is not available locally (squash merge,
-                    // shallow clone), skip advancing to avoid double-counting
-                    // commits already included in the initial scan.
+                    // Scan post-merge commits once (merge_commit_sha doesn't change)
+                    let newCommits: Array<{ hash: string; raw: string; type: string; scope: string | null; breaking: boolean; description: string; body: string[]; footers: Array<{ token: string; value: string }> }> = [];
+                    let newBump: 'major' | 'minor' | 'patch' | null = null;
                     try {
                         const log = await git.log([`${existingPr.merge_commit_sha}..HEAD`]);
-                        const newCommits: Array<{ hash: string; raw: string; type: string; scope: string | null; breaking: boolean; description: string; body: string[]; footers: Array<{ token: string; value: string }> }> = log.all
+                        newCommits = log.all
                             .map(e => parseCommit(e.message, e.hash))
                             .filter((c): c is NonNullable<typeof c> => c !== null && c !== undefined);
+                        newBump = recommendBump(newCommits);
+                    } catch {
+                        console.log(chalk.dim(`merge_commit_sha ${existingPr.merge_commit_sha} not found locally.`));
+                        console.log(chalk.yellow('Cannot determine post-merge commits. Skipping automatic version advancement.'));
+                        return;
+                    }
 
-                        const newBump = recommendBump(newCommits);
-                        if (newBump === null) {
-                            console.log(chalk.dim(`No new conventional commits since ${branchName} was merged. Skipping.`));
-                            return;
-                        }
+                    if (newBump === null) {
+                        console.log(chalk.dim(`No new conventional commits since ${branchName} was merged. Skipping.`));
+                        return;
+                    }
 
+                    // Loop: advance version until we find one without a closed PR
+                    // (handles the case where multiple versions were consumed by
+                    //  merged PRs but their tags were never created)
+                    while (true) {
                         const baseline = semver.parse(ver);
                         if (baseline === null) {
                             console.log(chalk.yellow(`Cannot parse version ${ver}. Skipping.`));
@@ -386,17 +394,19 @@ program
                         ver = baseline.inc(newBump).version;
                         branchName = `release/${ver}`;
                         commitsForPR = newCommits;
-                        console.log(chalk.dim(`Advancing to ${ver} based on post-merge commits.`));
+                        console.log(chalk.dim(`Advancing to ${ver}...`));
 
                         if (tags.all.includes(`v${ver}`)) {
                             console.log(chalk.dim(`Tag v${ver} already exists. Skipping.`));
                             return;
                         }
-                    } catch {
-                        console.log(chalk.dim(`merge_commit_sha ${existingPr.merge_commit_sha} not found locally.`));
-                        console.log(chalk.yellow('Cannot determine post-merge commits from a shallow or squash-merge history.'));
-                        console.log(chalk.dim('Skipping automatic version advancement. Release any new commits manually.'));
-                        return;
+
+                        // Check if the advanced version also has a closed PR
+                        const nextPr = await findPullRequest(owner, repo, branchName, token);
+                        if (nextPr === null || nextPr === undefined || nextPr.state === 'open') {
+                            break; // Available — use this version
+                        }
+                        console.log(chalk.dim(`PR #${nextPr.number} for ${branchName} is also ${nextPr.state}. Advancing further.`));
                     }
                 }
             }

@@ -97,10 +97,14 @@ export async function findPullRequest(
     token?: string,
 ): Promise<PullRequestInfo | null> {
     const octokit = createClient(token);
+    // head must be in "owner:branch" format — without the owner prefix,
+    // GitHub's API splits at '/' and misparses "release/0.6.4" as
+    // owner="release", branch="0.6.4", which returns wrong results.
+    const qualifiedHead = head.includes(':') ? head : `${owner}:${head}`;
     const {data} = await octokit.rest.pulls.list({
         owner,
         repo,
-        head,
+        head: qualifiedHead,
         state: 'all',
         per_page: 1,
     });
