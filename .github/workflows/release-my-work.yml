@@ -3,6 +3,9 @@ name: Release PR
 on:
   push:
     branches: [main]
+  pull_request:
+    types: [closed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -15,6 +18,7 @@ concurrency:
 
 jobs:
   release-pr:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,17 +45,43 @@ jobs:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: node dist/index.js release-pr
 
-      - name: Publish merged release
+  publish:
+    if: >
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install & Build
+        run: |
+          npm ci || npm install
+          npm run build
+
+      - name: Configure Git
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Extract version from merged PR branch
+        id: version
+        run: |
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          echo "version=${BRANCH#release/}" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag, changelog, release & delete branch
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          VER=$(git log --merges --oneline -5 \
-            | grep -oP 'release/\K\d+\.\d+\.\d+' \
-            | head -1 || true)
-          if [ -n "$VER" ]; then
-            echo "Detected merged version: $VER"
-            node dist/index.js release-publish --version "$VER"
-          else
-            echo "No merged release/ branch detected. Skipping publish."
-          fi
+          node dist/index.js release-publish \
+            --version ${{ steps.version.outputs.version }}
