@@ -110,6 +110,5 @@ jobs:
               --head "$BRANCH" \
               --base main \
               --title "chore(release): ${VER}" \
-              --body "$PR_BODY" \
-              --label release
+              --body "$PR_BODY"
           fi
