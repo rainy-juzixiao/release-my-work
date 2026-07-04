@@ -101,7 +101,8 @@ jobs:
           git add package.json
           git commit -m "chore(release): ${VER}"
 
-          git push origin "$BRANCH"
+          # Force push — release branch is rebuilt from latest main each time
+          git push origin "$BRANCH" --force-with-lease
 
           if gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" &>/dev/null; then
             echo "PR already exists for '$BRANCH'.  Updating."
