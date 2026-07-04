@@ -250,11 +250,10 @@ program
 
             if (existingPr !== null && existingPr !== undefined) {
                 if (existingPr.state === 'closed' || existingPr.state === 'merged') {
-                    console.log(chalk.yellow(`PR #${existingPr.number} for ${branchName} is ${existingPr.state}.`));
-                    console.log(chalk.yellow(`Tag v${ver} is missing — creating it to complete the release.`));
-                    await git.addTag(`v${ver}`);
-                    await git.pushTags('origin');
-                    console.log(chalk.green(`Tag v${ver} created and pushed.`));
+                    console.log(chalk.yellow(`PR #${existingPr.number} for ${branchName} is ${existingPr.state}. Skipping.`));
+                    if (existingPr.state === 'merged') {
+                        console.log(chalk.yellow(`Tag v${ver} should have been created by publish.yml. Check that workflow.`));
+                    }
                     return;
                 }
                 console.log(chalk.dim(`Found open PR #${existingPr.number}. Will update.`));
