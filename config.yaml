@@ -1,0 +1,94 @@
+release-type: node
+package-name: release-my-work
+include-v-in-tag: true
+
+# Bump strategy: default | always-bump-patch
+versioning: default
+# Bump minor (not major) for BREAKING CHANGE when < 1.0.0
+bump-minor-pre-major: true
+# feat bumps patch instead of minor when < 1.0.0
+bump-patch-for-minor-pre-major: false
+# Force a specific next version (remove after release is merged)
+release-as: ""
+# Prerelease identifier (alpha, beta, rc)
+prerelease: false
+prerelease-type: ""
+
+pull-request:
+  title-pattern: "chore${scope}: release${component} ${version}"
+  header: ""
+  footer: ""
+  draft: false
+  labels:
+    - autorelease: pending
+  release-label:
+    autorelease: tagged
+  skip-label: ""
+  date: true
+
+changelog-path: CHANGELOG.md
+changelog-type: default  # default | github
+changelog-host: https://github.com
+changelog-sections:
+  - type: feat
+    section: Features
+    hidden: false
+  - type: fix
+    section: Bug Fixes
+    hidden: false
+  - type: docs
+    section: Documentation
+    hidden: false
+  - type: refactor
+    section: Code Refactoring
+    hidden: false
+  - type: perf
+    section: Performance Improvements
+    hidden: false
+  - type: test
+    section: Tests
+    hidden: false
+  - type: build
+    section: Build System
+    hidden: false
+  - type: ci
+    section: Continuous Integration
+    hidden: false
+  - type: chore
+    section: Miscellaneous Chores
+    hidden: true
+  - type: revert
+    section: Reverts
+    hidden: false
+  - type: style
+    section: Styles
+    hidden: false
+
+github:
+  fork: false
+  draft: false
+  prerelease: false
+  skip-github-release: false
+  signoff: ""
+
+# Additional files to update version in (glob patterns / jsonpath)
+extra-files: []
+
+# Path to component (for monorepo setup)
+# path: packages/*
+# include-component-in-tag: false
+# tag-separator: "-"
+# separate-pull-requests: false
+
+# SHA to use as starting point for release notes (first run only)
+# bootstrap-sha: ""
+# Override the last release SHA detection
+# last-release-sha: ""
+# Max releases to search when finding the last release
+release-search-depth: 400
+# Max commits to search when collecting history
+commit-search-depth: 500
+# Issue GitHub API calls sequentially (reduces throttling)
+sequential-calls: false
+# Skip automatic labeling of pull requests
+skip-labeling: false
