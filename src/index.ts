@@ -693,11 +693,11 @@ program
 
             // Auto-detect version when not explicitly provided
             if (ver === undefined || ver === null || ver === '') {
-                const headLog = await git.log(['--oneline', '-10']);
+                const headLog = await git.log({ maxCount: 10 });
                 const messages = headLog.all.map(e => e.message);
 
                 // Strategy 1: find merge commits containing "release/X.X.X"
-                const mergeLog = await git.log(['--merges', '--oneline', '-10']);
+                const mergeLog = await git.log(['--merges', '-10']);
                 let match = mergeLog.all
                     .map(e => e.message.match(/release\/(\d+\.\d+\.\d+)/))
                     .find(Boolean);
@@ -737,7 +737,7 @@ program
             }
 
             // Verify the merge exists: check merge commits first, then any recent commit
-            const recentLog = await git.log(['--oneline', '-10']);
+            const recentLog = await git.log({ maxCount: 10 });
             const releaseCommit = recentLog.all.find(
                 e => e.message.includes(`release/${ver}`)
                     || e.message.includes(`v${ver}`)
