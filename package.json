@@ -23,8 +23,8 @@
     "github",
     "release"
   ],
-  "author": "",
-  "license": "ISC",
+  "author": "rainy-juzixiao",
+  "license": "MIT",
   "dependencies": {
     "@eslint/js": "^10.0.1",
     "@octokit/rest": "^21.1.1",
