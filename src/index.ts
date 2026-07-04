@@ -324,7 +324,10 @@ program
                 console.log(chalk.green(`Created PR #${created.number}: ${chalk.underline(created.url)}`));
             }
 
-            try { await git.checkout(currentBranch); } catch { /* ok */ }
+            try {
+                await git.checkout(currentBranch);
+            } catch { /* ok */
+            }
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : String(err);
             console.error(chalk.red('Error:'), errorMessage);
