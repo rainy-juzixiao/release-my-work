@@ -37,7 +37,7 @@ import {releasePublishAction} from '#@/command/release-publish.js';
 //       Once resolved, the config should be merged with command options.
 //       CLI flags take precedence over file config.
 
-const program = new Command();
+const program: Command = new Command();
 
 program
     .name('release-my-work')
