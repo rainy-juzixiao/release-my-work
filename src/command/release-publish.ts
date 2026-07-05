@@ -25,7 +25,6 @@
 import chalk from 'chalk';
 import {scanGitHistory, openGit} from '#@/git';
 import {createClient} from '#@/github';
-import {defaultConfig} from '#@/config/index.js';
 
 export interface ReleasePublishOptions {
     ver?: string;
