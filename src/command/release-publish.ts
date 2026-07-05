@@ -143,10 +143,8 @@ export async function releasePublishAction(options: ReleasePublishOptions): Prom
         const refType = releaseCommit.message.includes('Merge') ? 'merge commit' : 'commit';
         console.log(chalk.green(`Release PR merged: ${releaseCommit.hash} ${releaseCommit.message} (${refType})`));
 
-        await git.addTag(`v${ver}`);
-        await git.push(['origin', `v${ver}`]);
-        console.log(chalk.green(`Tagged v${ver}`));
-
+        // Generate changelog BEFORE creating the tag,
+        // otherwise getLatestTag() finds v${ver} and the log range becomes empty.
         const scan = await scanGitHistory({repoPath: options.path});
         const commitBullets = scan.commits
             .map(c => {
@@ -159,6 +157,10 @@ export async function releasePublishAction(options: ReleasePublishOptions): Prom
         const changelog = `## ${ver}\n\n${commitBullets}`;
         console.log(chalk.dim('\nChangelog:'));
         console.log(changelog);
+
+        await git.addTag(`v${ver}`);
+        await git.push(['origin', `v${ver}`]);
+        console.log(chalk.green(`Tagged v${ver}`));
 
         const octokit = createClient(token);
         const releaseResp = await octokit.rest.repos.createRelease({
