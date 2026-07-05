@@ -24,7 +24,7 @@
 import { createRequire } from 'node:module';
 
 import { deepMerge } from '#@/utils/deep-merge.js';
-import { defaultConfig, type ReleaseConfig } from '../definitions.js';
+import { defaultConfig, type ReleaseConfig } from '#@/config';
 
 /**
  * Load a CommonJS (`.js`) configuration file and merge it with defaults.

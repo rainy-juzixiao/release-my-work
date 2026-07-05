@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 import { deepMerge } from '#@/utils/deep-merge.js';
-import { defaultConfig, type ReleaseConfig } from '../definitions.js';
+import { defaultConfig, type ReleaseConfig } from '#@/config';
 
 /**
  * Load a TypeScript (`.ts`) configuration file and merge it with defaults.

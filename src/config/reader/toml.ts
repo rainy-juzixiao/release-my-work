@@ -25,7 +25,7 @@ import * as fs from 'node:fs';
 import { parse } from 'smol-toml';
 
 import { deepMerge } from '#@/utils/deep-merge.js';
-import { defaultConfig, type ReleaseConfig } from '../definitions.js';
+import { defaultConfig, type ReleaseConfig } from '#@/config';
 
 /**
  * Load a TOML configuration file and merge it with the built-in defaults.

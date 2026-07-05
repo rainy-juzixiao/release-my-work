@@ -23,7 +23,7 @@
  */
 import * as path from 'node:path';
 
-import type { ReleaseConfig } from '../definitions.js';
+import type { ReleaseConfig } from '#@/config';
 
 import { loadConfigFromYaml } from './yaml.js';
 import { loadConfigFromJson } from './json.js';
@@ -40,10 +40,6 @@ export {
     loadConfigFromMjs,
     loadConfigFromTs,
 };
-
-// ---------------------------------------------------------------------------
-// Unified auto-detection
-// ---------------------------------------------------------------------------
 
 const SYNC_FORMATS = new Set(['.yaml', '.yml', '.json', '.toml', '.js', '.cjs']);
 const ASYNC_FORMATS = new Set(['.mjs', '.ts']);

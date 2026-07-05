@@ -25,7 +25,7 @@ import * as fs from 'node:fs';
 import * as yaml from 'js-yaml';
 
 import { deepMerge } from '#@/utils/deep-merge.js';
-import { defaultConfig, type ReleaseConfig } from '../definitions.js';
+import { defaultConfig, type ReleaseConfig } from '#@/config';
 
 /**
  * Load a YAML configuration file and merge it with the built-in defaults.
