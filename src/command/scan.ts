@@ -46,6 +46,10 @@ export async function scanAction(options: ScanOptions): Promise<void> {
 
         const result = await scanGitHistory({
             repoPath: options.path,
+            // TODO: Config — Pass cfg.releaseSearchDepth and cfg.commitSearchDepth
+            //       as maxCount or separate depth params to scanGitHistory,
+            //       and use cfg.sequentialCalls to control parallel vs sequential
+            //       history scanning.
             maxCount: options.maxCount,
         });
 

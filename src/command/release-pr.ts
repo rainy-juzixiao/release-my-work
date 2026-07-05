@@ -85,6 +85,11 @@ export async function releasePrAction(options: ReleasePrOptions): Promise<void> 
             bumpMinorPreMajor: cfg.bumpMinorPreMajor,
             bumpPatchForMinorPreMajor: cfg.bumpPatchForMinorPreMajor,
         });
+        // TODO: Config — Use cfg.releaseAs to override computed version,
+        //       cfg.prerelease / cfg.prereleaseType for prerelease suffix,
+        //       cfg.versioning for version strategy (e.g. 'default', 'always-bump-patch'),
+        //       cfg.releaseType for project-type-specific version logic.
+        //       Also check cfg.pullRequest.skipLabel in commits to skip creation.
         if (next === null || next === undefined) {
             console.log(chalk.dim('No version bump warranted. Nothing to release.'));
             return;
@@ -95,6 +100,8 @@ export async function releasePrAction(options: ReleasePrOptions): Promise<void> 
         let commitsForPR = result.commits;
 
         const tags = await git.tags();
+        // TODO: Config — Use cfg.includeVInTag; when false, check for ver
+        //       without 'v' prefix: tags.all.includes(ver).
         if (tags.all.includes(`v${ver}`)) {
             console.log(chalk.dim(`Tag v${ver} already exists. Version already released.`));
             return;
@@ -246,7 +253,14 @@ export async function releasePrAction(options: ReleasePrOptions): Promise<void> 
             ? `\n\n${cfg.pullRequest.footer}`
             : '';
 
+        // TODO: Config — Use cfg.changelogPath / cfg.changelogType /
+        //       cfg.changelogHost to write or format the changelog file
+        //       (e.g. update CHANGELOG.md in the release branch).
         const prBody = `${header}\n## ${ver}${dateLine}\n\n### Changelog\n\n${commitLog}${footer}\n\n---\nThis pull request was created by \`release-my-work\`.\n\n:warning: **After approval and merge**, the publish workflow will automatically create the git tag \`v${ver}\` and a GitHub Release.`;
+
+        // TODO: Config — Apply cfg.pullRequest.labels (actual API call) and
+        //       cfg.pullRequest.releaseLabel transitions after PR creation.
+        //       Check cfg.pullRequest.skipLabel before creating/updating.
 
         const remotes = await git.getRemotes(true);
         const originRemote = remotes.find(r => r.name === 'origin');
@@ -284,6 +298,8 @@ export async function releasePrAction(options: ReleasePrOptions): Promise<void> 
                 pkg.version = ver;
                 fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
             }
+            // TODO: Config — Use cfg.extraFiles to update version in
+            //       additional files (e.g. version.txt, Cargo.toml, pom.xml).
         } catch {
             // Fallback to version.txt when package.json is unavailable
             versionFile = 'version.txt';
@@ -301,6 +317,8 @@ export async function releasePrAction(options: ReleasePrOptions): Promise<void> 
 
         if (versionChanged === true) {
             await git.raw(['add', versionFile]);
+            // TODO: Config — Use cfg.github.signoff to add Signed-off-by
+            //       trailer to the commit message when non-empty.
             await git.raw(['commit', '-m', `chore(release): ${ver}`]);
         } else {
             // Branch would be identical to base — create an empty commit

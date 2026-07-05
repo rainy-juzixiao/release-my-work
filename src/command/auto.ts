@@ -51,6 +51,9 @@ export async function autoAction(options: AutoOptions): Promise<void> {
 
     try {
         const result = await scanGitHistory({repoPath: options.path});
+
+        // TODO: Config — Use cfg.releaseAs to override computed version,
+        //       cfg.prerelease / cfg.prereleaseType for prerelease suffix.
         const next = computeNextVersion(result.latestTag, result.commits);
 
         if (next === null || next === undefined) {
@@ -102,8 +105,16 @@ export async function autoAction(options: AutoOptions): Promise<void> {
             }
         }
 
+        // TODO: Config — Use cfg.extraFiles to version-bump additional files
+        //       (e.g. VERSION.txt, Cargo.toml) alongside package.json.
         await git.add('.');
+
+        // TODO: Config — Use cfg.github.signoff to add Signed-off-by trailer
+        //       to the commit message when non-empty.
         await git.commit(msg);
+
+        // TODO: Config — Use cfg.includeVInTag to control 'v' prefix;
+        //       when false, tag as next.newVersion instead of v${next.newVersion}.
         await git.addTag(`v${next.newVersion}`);
 
         await git.push('origin', result.currentBranch);
@@ -138,6 +149,9 @@ export async function autoAction(options: AutoOptions): Promise<void> {
             repo: options.repo as string,
             head: result.currentBranch,
             base: (options.base ?? 'main') as string,
+            // TODO: Config — Use cfg.pullRequest.titlePattern with
+            //       interpolateTemplate (${scope}, ${component}, ${version})
+            //       instead of buildVersionCommitMessage first line.
             title: msg.split('\n')[0],
             body,
             draft: cfg.pullRequest.draft,
@@ -145,6 +159,7 @@ export async function autoAction(options: AutoOptions): Promise<void> {
 
         console.log(chalk.green(`Pull Request created: ${chalk.underline(pr.url)}`));
 
+        // TODO: Config — Use cfg.skipLabeling to skip all labeling when true.
         // Apply labels from pullRequestConfig.labels
         if (cfg.pullRequest.labels.length > 0) {
             await addLabelsToPR(

@@ -26,6 +26,12 @@ import chalk from 'chalk';
 import {scanGitHistory, openGit} from '#@/git';
 import {createClient} from '#@/github';
 
+// TODO: Config — release-publish currently ignores all config options.
+//       It should load ReleaseConfig (via resolveConfig) and respect:
+//         cfg.includeVInTag, cfg.github.prerelease, cfg.github.draft,
+//         cfg.github.skipGitHubRelease, cfg.changelogPath, cfg.changelogType,
+//         cfg.changelogHost, cfg.skipLabeling.
+
 export interface ReleasePublishOptions {
     ver?: string;
     token?: string;
@@ -121,6 +127,8 @@ export async function releasePublishAction(options: ReleasePublishOptions): Prom
         }
 
         const tags = await git.tags();
+        // TODO: Config — Use cfg.includeVInTag; when false, check for ver
+        //       without 'v' prefix: tags.all.includes(ver).
         if (tags.all.includes(`v${ver}`)) {
             console.log(chalk.dim(`Tag v${ver} already exists. Nothing to publish.`));
             return;
@@ -154,6 +162,9 @@ export async function releasePublishAction(options: ReleasePublishOptions): Prom
             })
             .join('\n');
 
+        // TODO: Config — Use cfg.changelogPath / cfg.changelogType /
+        //       cfg.changelogHost to write/format the changelog file
+        //       (e.g. update CHANGELOG.md with the new version entry).
         const changelog = `## ${ver}\n\n${commitBullets}`;
         console.log(chalk.dim('\nChangelog:'));
         console.log(changelog);
@@ -163,6 +174,10 @@ export async function releasePublishAction(options: ReleasePublishOptions): Prom
         console.log(chalk.green(`Tagged v${ver}`));
 
         const octokit = createClient(token);
+        // TODO: Config — Use cfg.github.prerelease as the prerelease flag,
+        //       cfg.github.draft as the draft flag,
+        //       cfg.github.skipGitHubRelease to skip creation entirely,
+        //       cfg.includeVInTag for tag_name prefix.
         const releaseResp = await octokit.rest.repos.createRelease({
             owner,
             repo: repoName,

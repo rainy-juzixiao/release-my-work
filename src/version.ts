@@ -67,6 +67,15 @@ export function recommendBump(commits: ConventionalCommit[]): 'major' | 'minor' 
 /**
  * Compute the next version based on the current tag and commits.
  *
+ * TODO: Config — Consume cfg.releaseType, cfg.versioning, cfg.releaseAs,
+ *       cfg.prerelease, and cfg.prereleaseType to modify the bump strategy:
+ *       - releaseType: project-type-specific rules (node default semver,
+ *         ruby pessimistic, java maven, etc.)
+ *       - versioning: strategy name like 'default', 'always-bump-patch'
+ *       - releaseAs: override the computed version entirely
+ *       - prerelease / prereleaseType: append prerelease suffix (e.g.
+ *         '-alpha.1', '-beta.2') and auto-increment the prerelease number.
+ *
  * @param currentTag  Current semver tag (e.g. "v1.2.3" or "1.2.3")
  * @param commits     Conventional commits since that tag
  * @param options     Optional bump strategy overrides

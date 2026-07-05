@@ -51,6 +51,10 @@ export async function bumpAction(options: BumpOptions): Promise<void> {
             console.log(chalk.yellow('No semver tag found — treating as initial release.'));
         }
 
+        // TODO: Config — Use cfg.releaseAs to override computed version,
+        //       cfg.prerelease / cfg.prereleaseType for prerelease suffix,
+        //       cfg.versioning for version strategy, cfg.releaseType for
+        //       project-type-specific logic (e.g. node vs ruby vs java).
         const next = computeNextVersion(result.latestTag, result.commits);
 
         if (next === undefined || next === null) {
@@ -77,8 +81,16 @@ export async function bumpAction(options: BumpOptions): Promise<void> {
             const git = openGit(options.path);
             const msg = buildVersionCommitMessage(next.newVersion, next.bump);
 
+            // TODO: Config — Use cfg.extraFiles to version-bump additional
+            //       files alongside the default package.json (e.g. VERSION, Cargo.toml).
             await git.add('.');
+
+            // TODO: Config — Use cfg.github.signoff to add Signed-off-by
+            //       trailer to the commit message when non-empty.
             await git.commit(msg);
+
+            // TODO: Config — Use cfg.includeVInTag to control 'v' prefix;
+            //       when false, tag as next.newVersion instead of v${next.newVersion}.
             await git.addTag(`v${next.newVersion}`);
 
             console.log(chalk.green(`Committed and tagged v${next.newVersion}\n`));

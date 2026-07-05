@@ -79,6 +79,8 @@ export async function prAction(options: PrOptions): Promise<void> {
         //              + commitList
         //              + pullRequestConfig.footer
         //       header/footer support template interpolation (${version}, etc.).
+        //       Also add config-driven date line (pullRequestConfig.date)
+        //       and apply pullRequestConfig.releaseLabel transitions.
         const body = [
             `## ${next?.newVersion ?? 'Release'}\n`,
             commitList,
