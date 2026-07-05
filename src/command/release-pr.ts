@@ -151,10 +151,10 @@ export async function releasePrAction(options: ReleasePrOptions): Promise<void> 
             if (existingPr.state === 'open') {
                 console.log(chalk.dim(`Found open PR #${existingPr.number}. Will update.`));
             } else {
-                // PR is closed/merged — use GitHub API's merged flag directly
-                // (more reliable than checking merge_commit_sha via git.log,
-                // which fails in CI shallow clones).
-                if (existingPr.merged === true) {
+                // PR is closed — check merge_commit_sha to determine if merged.
+                // A merged PR has a non-null sha; a closed-without-merge PR has null.
+                const sha = existingPr.merge_commit_sha;
+                if (sha !== null && sha !== undefined && sha !== '') {
                     console.log(chalk.dim(`PR #${existingPr.number} was merged. Advancing version.`));
 
                     let newCommits: ConventionalCommit[] = [];
