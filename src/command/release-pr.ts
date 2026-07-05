@@ -26,9 +26,9 @@ import chalk from 'chalk';
 import fs from 'node:fs';
 import semver from 'semver';
 import {scanGitHistory, openGit} from '#@/git';
-import {computeNextVersion, recommendBump} from '#@/version';
+import {computeNextVersion} from '#@/version';
 import {createPullRequest, findPullRequest, updatePullRequest, parseGitHubRemote} from '#@/github';
-import {parseCommit} from '#@/conventional';
+import {parseCommit, type ConventionalCommit} from '#@/conventional';
 import {defaultConfig} from '#@/config/index.js';
 import {resolveConfig} from '#@/utils/resolve-config.js';
 
@@ -151,64 +151,66 @@ export async function releasePrAction(options: ReleasePrOptions): Promise<void> 
             if (existingPr.state === 'open') {
                 console.log(chalk.dim(`Found open PR #${existingPr.number}. Will update.`));
             } else {
-                console.log(chalk.dim(`PR #${existingPr.number} for ${branchName} is ${existingPr.state}.`));
+                // PR is closed/merged — use GitHub API's merged flag directly
+                // (more reliable than checking merge_commit_sha via git.log,
+                // which fails in CI shallow clones).
+                if (existingPr.merged === true) {
+                    console.log(chalk.dim(`PR #${existingPr.number} was merged. Advancing version.`));
 
-                // Try to determine if the PR was merged: attempt git log with
-                // merge_commit_sha..HEAD. If the SHA exists in local history
-                // (real merge commit), it works. Otherwise it throws — the
-                // PR was closed without merging (or the test merge ref
-                // refs/pull/N/merge was never pushed to any branch).
-                const sha = existingPr.merge_commit_sha;
-                if (sha !== undefined && sha !== null && sha !== '') {
+                    let newCommits: ConventionalCommit[] = [];
+                    let couldNotFetchHistory = false;
                     try {
-                        const log = await git.log([`${sha}..HEAD`]);
-                        const newCommits = log.all
+                        const log = await git.log([`${existingPr.merge_commit_sha}..HEAD`]);
+                        newCommits = log.all
                             .map(e => parseCommit(e.message, e.hash))
                             .filter((c): c is NonNullable<typeof c> => c !== null && c !== undefined);
-                        const newBump = recommendBump(newCommits);
+                    } catch {
+                        // Shallow clone — merge_commit_sha not in local history.
+                        // Continue with empty newCommits; advance loop still works.
+                        couldNotFetchHistory = true;
+                        console.log(chalk.dim('(merge commit not in local history — shallow clone?)'));
+                    }
 
-                        if (newBump === null) {
-                            console.log(chalk.dim(`No new conventional commits since ${branchName} was merged. Skipping.`));
+                    // If we have full history but no new conventional commits, skip
+                    if (couldNotFetchHistory === false && newCommits.length === 0) {
+                        console.log(chalk.dim(`No new conventional commits since ${branchName} was merged. Skipping.`));
+                        return;
+                    }
+
+                    // Advance version until we find one without a closed PR
+                    // Use 'patch' as the minimum increment to prevent runaway
+                    // version inflation when multiple releases were merged
+                    // without tags.
+                    let advanceIter = 0;
+                    const MAX_ADVANCE = 10;
+                    while (advanceIter < MAX_ADVANCE) {
+                        const baseline = semver.parse(ver);
+                        if (baseline === null) {
+                            console.log(chalk.yellow(`Cannot parse version ${ver}. Skipping.`));
                             return;
                         }
 
-                        // PR was merged — advance version until we find one
-                        // without a closed PR (handles previously consumed
-                        // versions where tags were never created).
-                        while (true) {
-                            const baseline = semver.parse(ver);
-                            if (baseline === null) {
-                                console.log(chalk.yellow(`Cannot parse version ${ver}. Skipping.`));
-                                return;
-                            }
+                        ver = baseline.inc('patch').version;
+                        branchName = `release/${ver}`;
+                        commitsForPR = newCommits;
+                        advanceIter++;
+                        console.log(chalk.dim(`Advancing to ${ver}...`));
 
-                            ver = baseline.inc(newBump).version;
-                            branchName = `release/${ver}`;
-                            commitsForPR = newCommits;
-                            console.log(chalk.dim(`Advancing to ${ver}...`));
-
-                            if (tags.all.includes(`v${ver}`)) {
-                                console.log(chalk.dim(`Tag v${ver} already exists. Skipping.`));
-                                return;
-                            }
-
-                            const nextPr = await findPullRequest(owner, repo, branchName, token);
-                            if (nextPr === null || nextPr === undefined || nextPr.state === 'open') {
-                                break;
-                            }
-                            console.log(chalk.dim(`PR #${nextPr.number} for ${branchName} is also ${nextPr.state}. Advancing further.`));
+                        if (tags.all.includes(`v${ver}`)) {
+                            console.log(chalk.dim(`Tag v${ver} already exists. Skipping.`));
+                            return;
                         }
-                        // Continue to create/update PR for the advanced version
-                    } catch {
-                        // merge_commit_sha not in local history (exit 128) —
-                        // PR was closed without merging.
-                        console.log(chalk.dim(`merge_commit_sha ${sha} not found locally. PR was closed without merging.`));
-                        console.log(chalk.dim('Will recreate the release branch for the same version.'));
-                        // Keep ver, branchName, commitsForPR unchanged
+
+                        const nextPr = await findPullRequest(owner, repo, branchName, token);
+                        if (nextPr === null || nextPr === undefined || nextPr.state === 'open') {
+                            break;
+                        }
+                        console.log(chalk.dim(`PR #${nextPr.number} for ${branchName} is also ${nextPr.state}. Advancing further.`));
                     }
+                    // Continue to create/update PR for the advanced version
                 } else {
-                    // No merge_commit_sha at all — definitely not merged
-                    console.log(chalk.dim('PR was closed without merging. Will recreate the release branch.'));
+                    console.log(chalk.dim(`PR #${existingPr.number} was closed without merging. Will force-recreate.`));
+                    // Keep ver, branchName, commitsForPR unchanged — force push below
                 }
             }
         }
@@ -293,7 +295,7 @@ export async function releasePrAction(options: ReleasePrOptions): Promise<void> 
             }
         }
 
-        if (versionChanged) {
+        if (versionChanged === true) {
             await git.raw(['add', versionFile]);
             await git.raw(['commit', '-m', `chore(release): ${ver}`]);
         } else {
@@ -315,7 +317,9 @@ export async function releasePrAction(options: ReleasePrOptions): Promise<void> 
         }
 
         console.log(chalk.dim(`Pushing ${branchName}...`));
-        await git.raw(['push', 'origin', branchName]);
+        // Force-push: the local branch was recreated from HEAD, so it may not
+        // fast-forward the remote branch (e.g. when overwriting a closed PR).
+        await git.raw(['push', '--force', 'origin', branchName]);
 
         const title = interpolateTemplate(cfg.pullRequest.titlePattern, {
             scope: '(release)',

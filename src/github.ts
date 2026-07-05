@@ -44,6 +44,7 @@ export interface PullRequestInfo {
     state: string;
     html_url: string;
     merge_commit_sha: string | null;
+    merged: boolean;
 }
 
 export function createClient(token?: string): Octokit {
@@ -108,7 +109,13 @@ export async function findPullRequest(
         per_page: 1,
     });
     return data[0] !== undefined && data[0] !== null
-        ? {number: data[0].number, state: data[0].state, html_url: data[0].html_url, merge_commit_sha: data[0].merge_commit_sha ?? null}
+        ? {
+            number: data[0].number,
+            state: data[0].state,
+            html_url: data[0].html_url,
+            merge_commit_sha: data[0].merge_commit_sha ?? null,
+            merged: data[0].merged ?? false,
+        }
         : null;
 }
 
