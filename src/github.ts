@@ -31,6 +31,7 @@ export interface GitHubCreatePROptions {
     base: string;
     title: string;
     body: string;
+    draft?: boolean;
 }
 
 export interface GitHubPRResult {
@@ -68,9 +69,6 @@ export function parseGitHubRemote(remote: string): {owner: string; repo: string}
 export async function createPullRequest(options: GitHubCreatePROptions): Promise<GitHubPRResult> {
     const octokit = createClient(options.token);
 
-    // TODO: PR — Support draft flag from pullRequestConfig
-    //       Octokit's pulls.create accepts { ..., draft: boolean }.
-    //       Pass pullRequestConfig.draft to create draft PRs.
     const response = await octokit.rest.pulls.create({
         owner: options.owner,
         repo: options.repo,
@@ -78,6 +76,7 @@ export async function createPullRequest(options: GitHubCreatePROptions): Promise
         base: options.base,
         title: options.title,
         body: options.body,
+        ...(options.draft !== undefined ? { draft: options.draft } : {}),
     });
 
     return {
@@ -123,6 +122,7 @@ export async function updatePullRequest(
     title: string,
     body: string,
     token?: string,
+    draft?: boolean,
 ): Promise<GitHubPRResult> {
     const octokit = createClient(token);
     const response = await octokit.rest.pulls.update({
@@ -131,6 +131,7 @@ export async function updatePullRequest(
         pull_number: pullNumber,
         title,
         body,
+        ...(draft !== undefined ? { draft } : {}),
     });
     return {
         url: response.data.html_url,

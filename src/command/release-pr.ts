@@ -32,6 +32,10 @@ import {parseCommit} from '#@/conventional';
 import {defaultConfig} from '#@/config/index.js';
 import {resolveConfig} from '#@/utils/resolve-config.js';
 
+function interpolateTemplate(template: string, vars: Record<string, string>): string {
+    return template.replace(/\$\{(\w+)\}/g, (_, key: string) => vars[key] ?? '');
+}
+
 export interface ReleasePrOptions {
     configPath?: string;
     path?: string;
@@ -175,20 +179,19 @@ export async function releasePrAction(options: ReleasePrOptions): Promise<void> 
             })
             .join('\n');
 
-        const header = cfg.pullRequest.header === null ? "The Release Pull Request Is Created\n-----------------\n" : cfg.pullRequest.header;
+        const header = cfg.pullRequest.header !== ''
+            ? cfg.pullRequest.header
+            : "The Release Pull Request Is Created\n-----------------\n";
 
-        const prBody = `${header}\n## ${ver}\n\n### Changelog\n\n${commitLog}\n\n---\nThis pull request was created by \`release-my-work\`.\n\n:warning: **After approval and merge**, the publish workflow will automatically create the git tag \`v${ver}\` and a GitHub Release.`;
-        // TODO: PR — Use pullRequestConfig for titlePattern, header, footer
-        //       Same principle as the `pr` command: interpolate templates
-        //       from user config instead of hardcoded text.
+        const dateLine = cfg.pullRequest.date
+            ? `\n## ${new Date().toISOString().split('T')[0]}\n`
+            : '';
 
-        // TODO: PR — Support pullRequestConfig.date
-        //       If pullRequestConfig.date === true, insert today's date
-        //       in the body header (e.g. "## 2026-07-04").
+        const footer = cfg.pullRequest.footer !== ''
+            ? `\n\n${cfg.pullRequest.footer}`
+            : '';
 
-        // TODO: PR — Support pullRequestConfig.draft flag
-        //       createPullRequest / updatePullRequest accept a draft
-        //       parameter. Read it from user config.
+        const prBody = `${header}\n## ${ver}${dateLine}\n\n### Changelog\n\n${commitLog}${footer}\n\n---\nThis pull request was created by \`release-my-work\`.\n\n:warning: **After approval and merge**, the publish workflow will automatically create the git tag \`v${ver}\` and a GitHub Release.`;
 
         const remotes = await git.getRemotes(true);
         const originRemote = remotes.find(r => r.name === 'origin');
@@ -265,10 +268,14 @@ export async function releasePrAction(options: ReleasePrOptions): Promise<void> 
         console.log(chalk.dim(`Pushing ${branchName}...`));
         await git.raw(['push', 'origin', branchName]);
 
-        const title = `chore(release): ${ver}`;
+        const title = interpolateTemplate(cfg.pullRequest.titlePattern, {
+            scope: '(release)',
+            component: cfg.packageName,
+            version: ver,
+        });
 
         if (existingPr !== null && existingPr !== undefined && existingPr.state === 'open') {
-            const updated = await updatePullRequest(owner, repo, existingPr.number, title, prBody, token);
+            const updated = await updatePullRequest(owner, repo, existingPr.number, title, prBody, token, cfg.pullRequest.draft);
             console.log(chalk.green(`Updated PR #${updated.number}: ${chalk.underline(updated.url)}`));
         } else {
             const created = await createPullRequest({
@@ -279,6 +286,7 @@ export async function releasePrAction(options: ReleasePrOptions): Promise<void> 
                 base: (options.base ?? 'main') as string,
                 title,
                 body: prBody,
+                draft: cfg.pullRequest.draft,
             });
             console.log(chalk.green(`Created PR #${created.number}: ${chalk.underline(created.url)}`));
         }
