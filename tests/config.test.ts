@@ -71,7 +71,7 @@ describe('defaultConfig', () => {
 
     it('should have default pullRequest config', () => {
         expect(defaultConfig.pullRequest.titlePattern).toBe(
-            'chore${scope}: release${component} ${version}',
+            'chore${scope}: ${version}',
         );
         expect(defaultConfig.pullRequest.header).toBe('');
         expect(defaultConfig.pullRequest.footer).toBe('');
@@ -138,7 +138,7 @@ describe('loadConfigFromYaml', () => {
         const config = loadConfigFromYaml(fixturePath('valid-config.yaml'));
 
         expect(config.pullRequest.titlePattern).toBe(
-            'chore${scope}: release${component} ${version}',
+            'chore${scope}: ${version}',
         );
         expect(config.pullRequest.header).toBe('');
         expect(config.pullRequest.footer).toBe('');
