@@ -32,6 +32,8 @@ export default tseslint.config(
             'src/frontend/generated/*',
             'eslint.config.js',
             'tests/**',
+            'coverage/**',
+            'jest.config.cjs',
         ]
     },
     eslint.configs.recommended,
