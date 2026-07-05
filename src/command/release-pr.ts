@@ -42,6 +42,7 @@ export interface ReleasePrOptions {
     owner?: string;
     repo?: string;
     base?: string;
+    dryRun?: boolean;
 }
 
 export async function releasePrAction(options: ReleasePrOptions): Promise<void> {
@@ -55,10 +56,6 @@ export async function releasePrAction(options: ReleasePrOptions): Promise<void> 
     }
 
     const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
-    if (token === undefined || token === null || token === '') {
-        console.error(chalk.red('Error:'), 'GH_TOKEN or GITHUB_TOKEN environment variable is required.');
-        process.exit(1);
-    }
 
     try {
         const git = openGit(options.path);
@@ -84,7 +81,10 @@ export async function releasePrAction(options: ReleasePrOptions): Promise<void> 
         console.log(chalk.dim('Scanning git history...'));
         const result = await scanGitHistory({repoPath: options.path});
 
-        const next = computeNextVersion(result.latestTag, result.commits);
+        const next = computeNextVersion(result.latestTag, result.commits, {
+            bumpMinorPreMajor: cfg.bumpMinorPreMajor,
+            bumpPatchForMinorPreMajor: cfg.bumpPatchForMinorPreMajor,
+        });
         if (next === null || next === undefined) {
             console.log(chalk.dim('No version bump warranted. Nothing to release.'));
             return;
@@ -97,6 +97,50 @@ export async function releasePrAction(options: ReleasePrOptions): Promise<void> 
         const tags = await git.tags();
         if (tags.all.includes(`v${ver}`)) {
             console.log(chalk.dim(`Tag v${ver} already exists. Version already released.`));
+            return;
+        }
+
+        // Dry-run: preview without touching GitHub API or git operations
+        if (options.dryRun === true) {
+            const visibleTypes = new Set(
+                cfg.changelogSections.filter(s => !s.hidden).map(s => s.type)
+            );
+            const commitLog = commitsForPR
+                .filter(c => visibleTypes.has(c.type))
+                .map(c => {
+                    const scope = c.scope !== undefined && c.scope !== null && c.scope !== ''
+                        ? `(${c.scope})`
+                        : '';
+                    const breaking = c.breaking ? '!' : '';
+                    return `- ${c.type}${scope}${breaking}: ${c.description}`;
+                })
+                .join('\n');
+            const header = cfg.pullRequest.header !== ''
+                ? cfg.pullRequest.header
+                : "The Release Pull Request Is Created\n-----------------\n";
+            const dateLine = cfg.pullRequest.date
+                ? `\n## ${new Date().toISOString().split('T')[0]}\n`
+                : '';
+            const footer = cfg.pullRequest.footer !== ''
+                ? `\n\n${cfg.pullRequest.footer}`
+                : '';
+            const prBody = `${header}\n## ${ver}${dateLine}\n\n### Changelog\n\n${commitLog}${footer}\n\n---\nThis pull request was created by \`release-my-work\`.\n\n:warning: **After approval and merge**, the publish workflow will automatically create the git tag \`v${ver}\` and a GitHub Release.`;
+            const title = interpolateTemplate(cfg.pullRequest.titlePattern, {
+                scope: '(release)',
+                component: cfg.packageName,
+                version: ver,
+            });
+
+            console.log(chalk.bold('\n── Dry Run Preview ──\n'));
+            console.log(chalk.cyan('Branch: '), branchName);
+            console.log(chalk.cyan('Base:   '), options.base ?? 'main');
+            console.log(chalk.cyan('Title:  '), title);
+            console.log(chalk.cyan('Draft:  '), cfg.pullRequest.draft);
+            console.log(chalk.cyan('Labels: '), cfg.pullRequest.labels.join(', '));
+            console.log('');
+            console.log(chalk.cyan('Body:'));
+            console.log(prBody);
+            console.log(chalk.dim('\n(dry-run — stopping before any git operations & PR creation)\n'));
             return;
         }
 
@@ -169,7 +213,12 @@ export async function releasePrAction(options: ReleasePrOptions): Promise<void> 
             }
         }
 
+        const visibleTypes = new Set(
+            cfg.changelogSections.filter(s => !s.hidden).map(s => s.type)
+        );
+
         const commitLog = commitsForPR
+            .filter(c => visibleTypes.has(c.type))
             .map(c => {
                 const scope = c.scope !== undefined && c.scope !== null && c.scope !== ''
                     ? `(${c.scope})`

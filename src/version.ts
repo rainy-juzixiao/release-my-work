@@ -69,11 +69,21 @@ export function recommendBump(commits: ConventionalCommit[]): 'major' | 'minor' 
  *
  * @param currentTag  Current semver tag (e.g. "v1.2.3" or "1.2.3")
  * @param commits     Conventional commits since that tag
+ * @param options     Optional bump strategy overrides
+ * @param options.bumpMinorPreMajor     When true and version < 1.0.0, BREAKING
+ *                                      CHANGE bumps MINOR instead of MAJOR.
+ * @param options.bumpPatchForMinorPreMajor
+ *                                      When true and version < 1.0.0, feat
+ *                                      bumps PATCH instead of MINOR.
  * @returns           The new version and bump info, or null if no bump warranted
  */
 export function computeNextVersion(
     currentTag: string | null,
-    commits: ConventionalCommit[]
+    commits: ConventionalCommit[],
+    options?: {
+        bumpMinorPreMajor?: boolean;
+        bumpPatchForMinorPreMajor?: boolean;
+    },
 ): VersionBumpResult | null {
     const clean = currentTag !== null && currentTag !== '' && currentTag !== undefined
         ? (semver.clean(currentTag) ?? '0.0.0')
@@ -85,10 +95,22 @@ export function computeNextVersion(
     }
     const current = parsed;
 
-    const bump = recommendBump(commits);
+    let bump = recommendBump(commits);
 
     if (bump === null || bump === undefined) {
         return null;
+    }
+
+    // Pre-1.0.0 adjustments from user config
+    if (current.major === 0) {
+        // feat → patch (instead of minor) when bumpPatchForMinorPreMajor is true
+        if (options?.bumpPatchForMinorPreMajor === true && bump === 'minor') {
+            bump = 'patch';
+        }
+        // BREAKING CHANGE → minor (instead of major) when bumpMinorPreMajor is true
+        if (options?.bumpMinorPreMajor === true && bump === 'major') {
+            bump = 'minor';
+        }
     }
 
     const next = current.inc(bump);

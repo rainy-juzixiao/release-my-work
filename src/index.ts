@@ -79,6 +79,7 @@ program
     .option('-o, --owner <owner>', 'GitHub owner (parsed from git remote if omitted)')
     .option('-r, --repo <repo>', 'GitHub repo name (parsed from git remote if omitted)')
     .option('--base <branch>', 'Target branch (default: main)', 'main')
+    .option('--dry-run', 'Show what would happen without making changes')
     .action(releasePrAction);
 
 program
