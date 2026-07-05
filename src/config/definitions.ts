@@ -80,7 +80,7 @@ export const defaultConfig: ReleaseConfig = {
     prerelease: false,
     prereleaseType: '',
     pullRequest: {
-        titlePattern: 'chore${scope}: release${component} ${version}',
+        titlePattern: 'chore${scope}: ${version}',
         header: '',
         footer: '',
         draft: false,
