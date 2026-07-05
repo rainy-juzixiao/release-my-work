@@ -39,6 +39,22 @@ export interface GitHubPRResult {
     number: number;
 }
 
+export async function addLabelsToPR(
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    labels: string[],
+    token?: string,
+): Promise<void> {
+    const octokit = createClient(token);
+    await octokit.rest.issues.addLabels({
+        owner,
+        repo,
+        issue_number: pullNumber,
+        labels,
+    });
+}
+
 export interface PullRequestInfo {
     number: number;
     state: string;
