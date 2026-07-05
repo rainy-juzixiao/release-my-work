@@ -151,16 +151,20 @@ export async function releasePrAction(options: ReleasePrOptions): Promise<void> 
             if (existingPr.state === 'open') {
                 console.log(chalk.dim(`Found open PR #${existingPr.number}. Will update.`));
             } else {
-                // PR is closed — check merge_commit_sha to determine if merged.
-                // A merged PR has a non-null sha; a closed-without-merge PR has null.
-                const sha = existingPr.merge_commit_sha;
-                if (sha !== null && sha !== undefined && sha !== '') {
+                // PR is closed — use GitHub API's authoritative `merged` flag
+                // (fetched via pulls.get for reliability).
+                if (existingPr.merged === true) {
                     console.log(chalk.dim(`PR #${existingPr.number} was merged. Advancing version.`));
 
+                    const mergeSha = existingPr.merge_commit_sha;
+                    if (mergeSha === null || mergeSha === undefined || mergeSha === '') {
+                        console.log(chalk.yellow('PR marked as merged but no merge commit SHA found. Skipping.'));
+                        return;
+                    }
                     let newCommits: ConventionalCommit[] = [];
                     let couldNotFetchHistory = false;
                     try {
-                        const log = await git.log([`${existingPr.merge_commit_sha}..HEAD`]);
+                        const log = await git.log([`${mergeSha}..HEAD`]);
                         newCommits = log.all
                             .map(e => parseCommit(e.message, e.hash))
                             .filter((c): c is NonNullable<typeof c> => c !== null && c !== undefined);

@@ -44,6 +44,7 @@ export interface PullRequestInfo {
     state: string;
     html_url: string;
     merge_commit_sha: string | null;
+    merged: boolean;
 }
 
 export function createClient(token?: string): Octokit {
@@ -88,6 +89,10 @@ export async function createPullRequest(options: GitHubCreatePROptions): Promise
 /**
  * Find a pull request by head branch.
  * Returns null if no PR exists for that branch.
+ *
+ * Uses pulls.list to find the PR number, then pulls.get to retrieve full
+ * details (including the `merged` boolean, which is not available on the
+ * list response type).
  */
 export async function findPullRequest(
     owner: string,
@@ -100,21 +105,32 @@ export async function findPullRequest(
     // GitHub's API splits at '/' and misparses "release/0.6.4" as
     // owner="release", branch="0.6.4", which returns wrong results.
     const qualifiedHead = head.includes(':') ? head : `${owner}:${head}`;
-    const {data} = await octokit.rest.pulls.list({
+    const list = await octokit.rest.pulls.list({
         owner,
         repo,
         head: qualifiedHead,
         state: 'all',
         per_page: 1,
     });
-    return data[0] !== undefined && data[0] !== null
-        ? {
-            number: data[0].number,
-            state: data[0].state,
-            html_url: data[0].html_url,
-            merge_commit_sha: data[0].merge_commit_sha ?? null,
-        }
-        : null;
+
+    if (list.data[0] === undefined || list.data[0] === null) {
+        return null;
+    }
+
+    // Fetch full PR details to get the `merged` boolean
+    const detail = await octokit.rest.pulls.get({
+        owner,
+        repo,
+        pull_number: list.data[0].number,
+    });
+
+    return {
+        number: detail.data.number,
+        state: detail.data.state,
+        html_url: detail.data.html_url ?? list.data[0].html_url,
+        merge_commit_sha: detail.data.merge_commit_sha ?? null,
+        merged: detail.data.merged ?? false,
+    };
 }
 
 /**
