@@ -64,35 +64,52 @@ export function recommendBump(commits: ConventionalCommit[]): 'major' | 'minor' 
     return bump;
 }
 
+/** Options that influence the version-bump computation */
+export interface VersionOptions {
+    bumpMinorPreMajor?: boolean;
+    bumpPatchForMinorPreMajor?: boolean;
+
+    /** Override the computed version entirely */
+    releaseAs?: string;
+
+    /** Version strategy: 'default' | 'always-bump-patch' */
+    versioning?: string;
+
+    /** Append a prerelease suffix (e.g. '-alpha.1', '-beta.2') */
+    prerelease?: boolean;
+    /** Prerelease label (e.g. 'alpha', 'beta', 'rc') */
+    prereleaseType?: string;
+
+    /**
+     * Project-type identifier for language-specific version rules.
+     * Passed through so commands can use it with the project adapter
+     * for file operations; version computation differences between
+     * projects are minimal (all use semver) but reserved for future use.
+     */
+    releaseType?: string;
+}
+
 /**
  * Compute the next version based on the current tag and commits.
  *
- * TODO: Config — Consume cfg.releaseType, cfg.versioning, cfg.releaseAs,
- *       cfg.prerelease, and cfg.prereleaseType to modify the bump strategy:
- *       - releaseType: project-type-specific rules (node default semver,
- *         ruby pessimistic, java maven, etc.)
- *       - versioning: strategy name like 'default', 'always-bump-patch'
- *       - releaseAs: override the computed version entirely
- *       - prerelease / prereleaseType: append prerelease suffix (e.g.
- *         '-alpha.1', '-beta.2') and auto-increment the prerelease number.
+ * Config integration:
+ * - `releaseAs` overrides the computed version entirely.
+ * - `versioning = 'always-bump-patch'` forces all bumps to patch.
+ * - `prerelease + prereleaseType` appends a prerelease suffix and
+ *   auto-increments the prerelease number if the label matches the
+ *   current tag's prerelease label.
+ * - `releaseType` is threaded through for the adapter-based file
+ *   operations in the command layer.
  *
  * @param currentTag  Current semver tag (e.g. "v1.2.3" or "1.2.3")
  * @param commits     Conventional commits since that tag
  * @param options     Optional bump strategy overrides
- * @param options.bumpMinorPreMajor     When true and version < 1.0.0, BREAKING
- *                                      CHANGE bumps MINOR instead of MAJOR.
- * @param options.bumpPatchForMinorPreMajor
- *                                      When true and version < 1.0.0, feat
- *                                      bumps PATCH instead of MINOR.
  * @returns           The new version and bump info, or null if no bump warranted
  */
 export function computeNextVersion(
     currentTag: string | null,
     commits: ConventionalCommit[],
-    options?: {
-        bumpMinorPreMajor?: boolean;
-        bumpPatchForMinorPreMajor?: boolean;
-    },
+    options?: VersionOptions,
 ): VersionBumpResult | null {
     const clean = currentTag !== null && currentTag !== '' && currentTag !== undefined
         ? (semver.clean(currentTag) ?? '0.0.0')
@@ -104,10 +121,25 @@ export function computeNextVersion(
     }
     const current = parsed;
 
+    if (options?.releaseAs !== undefined && options?.releaseAs !== null && options.releaseAs !== '') {
+        const forced = semver.valid(options.releaseAs);
+        if (forced !== null) {
+            return {
+                newVersion: forced,
+                bump: 'patch',
+                commits,
+            };
+        }
+    }
+
     let bump = recommendBump(commits);
 
     if (bump === null || bump === undefined) {
         return null;
+    }
+
+    if (options?.versioning === 'always-bump-patch') {
+        bump = 'patch';
     }
 
     // Pre-1.0.0 adjustments from user config
@@ -122,7 +154,22 @@ export function computeNextVersion(
         }
     }
 
-    const next = current.inc(bump);
+    let next = current.inc(bump);
+
+    if (options?.prerelease === true) {
+        const tag = options.prereleaseType !== undefined && options.prereleaseType !== null && options.prereleaseType !== ''
+            ? options.prereleaseType
+            : 'alpha';
+
+        // If the CURRENT tag is already a prerelease with the same label,
+        // just increment the prerelease number instead of bumping the base.
+        if (current.prerelease.length > 0 && current.prerelease[0] === tag) {
+            next = current.inc('prerelease');
+        } else {
+            next = next.inc('prerelease', tag);
+        }
+    }
+
     return {
         newVersion: next.version,
         bump,

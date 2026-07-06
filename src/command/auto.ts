@@ -24,10 +24,11 @@
 
 import chalk from 'chalk';
 import {scanGitHistory, openGit} from '#@/git';
-import {computeNextVersion, buildVersionCommitMessage} from '#@/version';
+import {computeNextVersion, buildVersionCommitMessage, type VersionOptions} from '#@/version';
 import {createPullRequest, addLabelsToPR} from '#@/github';
 import {defaultConfig} from '#@/config/index.js';
 import {resolveConfig} from '#@/utils/resolve-config.js';
+import {getAdapter} from '#@/project/index.js';
 
 export interface AutoOptions {
     configPath?: string;
@@ -52,9 +53,18 @@ export async function autoAction(options: AutoOptions): Promise<void> {
     try {
         const result = await scanGitHistory({repoPath: options.path});
 
-        // TODO: Config — Use cfg.releaseAs to override computed version,
-        //       cfg.prerelease / cfg.prereleaseType for prerelease suffix.
-        const next = computeNextVersion(result.latestTag, result.commits);
+        // Build version options from config
+        const versionOpts: VersionOptions = {
+            bumpMinorPreMajor: cfg.bumpMinorPreMajor,
+            bumpPatchForMinorPreMajor: cfg.bumpPatchForMinorPreMajor,
+            releaseAs: cfg.releaseAs !== '' ? cfg.releaseAs : undefined,
+            versioning: cfg.versioning !== 'default' ? cfg.versioning : undefined,
+            prerelease: cfg.prerelease,
+            prereleaseType: cfg.prereleaseType !== '' ? cfg.prereleaseType : undefined,
+            releaseType: cfg.releaseType,
+        };
+
+        const next = computeNextVersion(result.latestTag, result.commits, versionOpts);
 
         if (next === null || next === undefined) {
             console.log(chalk.yellow('No version bump warranted. Nothing to release.'));
@@ -65,7 +75,7 @@ export async function autoAction(options: AutoOptions): Promise<void> {
         console.log(chalk.bold(`${from} → ${chalk.green(next.newVersion)} (${next.bump})`));
 
         // Skip PR creation if any commit contains the skipLabel text
-        if (cfg.pullRequest.skipLabel !== undefined && cfg.pullRequest.skipLabel !== null && cfg.pullRequest.skipLabel !== '') {
+        if (cfg.pullRequest.skipLabel !== '') {
             const skipText = cfg.pullRequest.skipLabel.toLowerCase();
             const found = next.commits.some(c => {
                 const scope = c.scope !== undefined && c.scope !== null && c.scope !== ''
@@ -86,6 +96,7 @@ export async function autoAction(options: AutoOptions): Promise<void> {
         }
 
         const git = openGit(options.path);
+        const repoPath = options.path ?? process.cwd();
         const msg = buildVersionCommitMessage(next.newVersion, next.bump);
 
         const token = options.token !== undefined && options.token !== null && options.token !== ''
@@ -105,17 +116,30 @@ export async function autoAction(options: AutoOptions): Promise<void> {
             }
         }
 
-        // TODO: Config — Use cfg.extraFiles to version-bump additional files
-        //       (e.g. VERSION.txt, Cargo.toml) alongside package.json.
-        await git.add('.');
+        // Use the project adapter to determine which files to stage
+        const adapter = getAdapter(cfg.releaseType);
+        const versionFiles = await adapter.getVersionFiles(repoPath);
 
-        // TODO: Config — Use cfg.github.signoff to add Signed-off-by trailer
-        //       to the commit message when non-empty.
-        await git.commit(msg);
+        // Stage version files plus extraFiles from config
+        const stageFiles = [...versionFiles, ...cfg.extraFiles.map(f => `${repoPath}/${f}`)];
+        const uniqueFiles = [...new Set(stageFiles)];
 
-        // TODO: Config — Use cfg.includeVInTag to control 'v' prefix;
-        //       when false, tag as next.newVersion instead of v${next.newVersion}.
-        await git.addTag(`v${next.newVersion}`);
+        if (uniqueFiles.length > 0) {
+            await git.add(uniqueFiles);
+        } else {
+            await git.add('.');
+        }
+
+        // Build commit message, optionally appending Signed-off-by trailer
+        let commitMsg = msg;
+        if (cfg.github.signoff !== '') {
+            commitMsg += `\n\nSigned-off-by: ${cfg.github.signoff}`;
+        }
+        await git.commit(commitMsg);
+
+        // Use cfg.includeVInTag to control 'v' prefix
+        const tagName = cfg.includeVInTag ? `v${next.newVersion}` : next.newVersion;
+        await git.addTag(tagName);
 
         await git.push('origin', result.currentBranch);
         await git.pushTags('origin');
@@ -141,7 +165,7 @@ export async function autoAction(options: AutoOptions): Promise<void> {
             ? `\n\n${cfg.pullRequest.footer}`
             : '';
 
-        const body = `${header}\n## ${next.newVersion}${dateLine}\n\n### Changelog\n\n${commitList}${footer}\n\n---\nThis pull request was created by \`release-my-work\`.\n\n:warning: **After approval and merge**, the publish workflow will automatically create the git tag \`v${next.newVersion}\` and a GitHub Release.`;
+        const body = `${header}\n## ${next.newVersion}${dateLine}\n\n### Changelog\n\n${commitList}${footer}\n\n---\nThis pull request was created by \`release-my-work\`.\n\n:warning: **After approval and merge**, the publish workflow will automatically create the git tag \`${tagName}\` and a GitHub Release.`;
 
         const pr = await createPullRequest({
             token,
@@ -149,9 +173,6 @@ export async function autoAction(options: AutoOptions): Promise<void> {
             repo: options.repo as string,
             head: result.currentBranch,
             base: (options.base ?? 'main') as string,
-            // TODO: Config — Use cfg.pullRequest.titlePattern with
-            //       interpolateTemplate (${scope}, ${component}, ${version})
-            //       instead of buildVersionCommitMessage first line.
             title: msg.split('\n')[0],
             body,
             draft: cfg.pullRequest.draft,
@@ -159,9 +180,8 @@ export async function autoAction(options: AutoOptions): Promise<void> {
 
         console.log(chalk.green(`Pull Request created: ${chalk.underline(pr.url)}`));
 
-        // TODO: Config — Use cfg.skipLabeling to skip all labeling when true.
-        // Apply labels from pullRequestConfig.labels
-        if (cfg.pullRequest.labels.length > 0) {
+        // Apply labels from config (respect skipLabeling)
+        if (!cfg.skipLabeling && cfg.pullRequest.labels.length > 0) {
             await addLabelsToPR(
                 options.owner as string,
                 options.repo as string,
@@ -172,8 +192,7 @@ export async function autoAction(options: AutoOptions): Promise<void> {
             console.log(chalk.dim(`Labels added: ${cfg.pullRequest.labels.join(', ')}`));
         }
 
-        // Apply releaseLabel transitions: for each mapping, remove any label
-        // matching "${key}: *" and add "${key}: ${value}"
+        // Apply releaseLabel transitions
         for (const [key, value] of Object.entries(cfg.pullRequest.releaseLabel)) {
             const targetLabel = `${key}: ${value}`;
             try {
@@ -184,7 +203,8 @@ export async function autoAction(options: AutoOptions): Promise<void> {
                     [targetLabel],
                     token,
                 );
-            } catch { /* ok */ }
+            } catch { /* ok */
+            }
         }
     } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : String(err);

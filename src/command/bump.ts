@@ -24,9 +24,10 @@
 
 import chalk from 'chalk';
 import {scanGitHistory, openGit} from '#@/git';
-import {computeNextVersion, buildVersionCommitMessage} from '#@/version';
+import {computeNextVersion, buildVersionCommitMessage, type VersionOptions} from '#@/version';
 import {defaultConfig} from '#@/config/index.js';
 import {resolveConfig} from '#@/utils/resolve-config.js';
+import {getAdapter} from '#@/project/index.js';
 
 export interface BumpOptions {
     configPath?: string;
@@ -51,11 +52,18 @@ export async function bumpAction(options: BumpOptions): Promise<void> {
             console.log(chalk.yellow('No semver tag found — treating as initial release.'));
         }
 
-        // TODO: Config — Use cfg.releaseAs to override computed version,
-        //       cfg.prerelease / cfg.prereleaseType for prerelease suffix,
-        //       cfg.versioning for version strategy, cfg.releaseType for
-        //       project-type-specific logic (e.g. node vs ruby vs java).
-        const next = computeNextVersion(result.latestTag, result.commits);
+        // Build version options from config
+        const versionOpts: VersionOptions = {
+            bumpMinorPreMajor: cfg.bumpMinorPreMajor,
+            bumpPatchForMinorPreMajor: cfg.bumpPatchForMinorPreMajor,
+            releaseAs: cfg.releaseAs !== '' ? cfg.releaseAs : undefined,
+            versioning: cfg.versioning !== 'default' ? cfg.versioning : undefined,
+            prerelease: cfg.prerelease,
+            prereleaseType: cfg.prereleaseType !== '' ? cfg.prereleaseType : undefined,
+            releaseType: cfg.releaseType,
+        };
+
+        const next = computeNextVersion(result.latestTag, result.commits, versionOpts);
 
         if (next === undefined || next === null) {
             console.log(chalk.dim('\nNo conventional commits found that warrant a version bump.'));
@@ -79,21 +87,38 @@ export async function bumpAction(options: BumpOptions): Promise<void> {
 
         if (options.dryRun === undefined || options.dryRun === null || !options.dryRun) {
             const git = openGit(options.path);
-            const msg = buildVersionCommitMessage(next.newVersion, next.bump);
+            const repoPath = options.path ?? process.cwd();
 
-            // TODO: Config — Use cfg.extraFiles to version-bump additional
-            //       files alongside the default package.json (e.g. VERSION, Cargo.toml).
-            await git.add('.');
+            // Use the project adapter to determine which files to stage
+            // (e.g. package.json for Node, Cargo.toml for Rust, etc.)
+            const adapter = getAdapter(cfg.releaseType);
+            const versionFiles = await adapter.getVersionFiles(repoPath);
 
-            // TODO: Config — Use cfg.github.signoff to add Signed-off-by
-            //       trailer to the commit message when non-empty.
+            // Also stage any extra files the user configured
+            const stageFiles = [...versionFiles, ...cfg.extraFiles.map(f => `${repoPath}/${f}`)];
+
+            // Deduplicate
+            const uniqueFiles = [...new Set(stageFiles)];
+
+            if (uniqueFiles.length > 0) {
+                await git.add(uniqueFiles);
+            } else {
+                // Fallback: stage everything if the adapter returned no files
+                await git.add('.');
+            }
+
+            // Build commit message, optionally appending Signed-off-by trailer
+            let msg = buildVersionCommitMessage(next.newVersion, next.bump);
+            if (cfg.github.signoff !== '') {
+                msg += `\n\nSigned-off-by: ${cfg.github.signoff}`;
+            }
             await git.commit(msg);
 
-            // TODO: Config — Use cfg.includeVInTag to control 'v' prefix;
-            //       when false, tag as next.newVersion instead of v${next.newVersion}.
-            await git.addTag(`v${next.newVersion}`);
+            // Use cfg.includeVInTag to control the 'v' prefix
+            const tagName = cfg.includeVInTag ? `v${next.newVersion}` : next.newVersion;
+            await git.addTag(tagName);
 
-            console.log(chalk.green(`Committed and tagged v${next.newVersion}\n`));
+            console.log(chalk.green(`Committed and tagged ${tagName}\n`));
         } else {
             console.log(chalk.dim('(dry-run — no changes made)\n'));
         }
